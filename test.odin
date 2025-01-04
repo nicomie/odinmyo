@@ -17,7 +17,7 @@ EXTENSIONS := [?]cstring{
 DEVICE_EXTENSIONS := [?]cstring{
     vk.KHR_SWAPCHAIN_EXTENSION_NAME
 }
-
+MAX_FRAMES_IN_FLIGHT :: 2
 
 Context :: struct {
     window: ^sdl.Window,
@@ -25,10 +25,59 @@ Context :: struct {
     debugMessenger: vk.DebugUtilsMessengerEXT,
     physicalDevice: vk.PhysicalDevice,
     device: vk.Device,
+    queueIndices: [QueueFamily]int,
     graphicsQueue: vk.Queue,
     surface: vk.SurfaceKHR,
     presentQueue: vk.Queue,
-    swapchain: vk.SwapchainKHR,
+    swapchain: Swapchain,
+    renderPass: vk.RenderPass,
+    pipelineLayout: vk.PipelineLayout,
+    graphicsPipeline: vk.Pipeline,
+    commandPool: vk.CommandPool,
+    commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+    imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+    renderFinishedSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+    inFlightFences: [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+    currentFrame :u32,
+    framebufferResized :bool,
+}
+
+Swapchain :: struct {
+    handle: vk.SwapchainKHR,
+    imageCount: u32,
+    images: []vk.Image,
+    format: vk.Format,
+    extent: vk.Extent2D,
+    imageViews: []vk.ImageView,
+    framebuffers: []vk.Framebuffer
+}
+
+QueueFamily :: enum {
+    Graphics,
+    Present,
+}
+
+Vertex :: struct{
+    pos: [2]f32,
+    color: [3]f32,
+}
+
+getBindingDescription :: proc(vertex: Vertex) -> VertexInputRate{
+    bindingDescription : vk.VertexInputBindingDescription 
+    bindingDescription.binding = 0
+    bindingDescription.stride = sizeof(Vertex)
+    bindingDescription.inputRate = .VERTEX
+    return bindingDescription
+}
+
+getAttributeDescriptions :: proc(vertex: Vertex) -> [2]vk.VertexInputAttributeDescription {
+    attributeDescriptions : vk.VertexInputAttributeDescription 
+    attributeDescriptions[0].binding = 0
+    attributeDescriptions[0].location = 0
+    attributeDescriptions[0].format = .R32G32_SFLOAT
+    attributeDescriptions[0].offset = offsetof(Vertex, pos)
+    attributeDescriptions[1]
+    return attributeDescriptions
 }
 
 initWindow :: proc (ctx: ^Context) {
@@ -38,8 +87,8 @@ initWindow :: proc (ctx: ^Context) {
     }
 
     // Create window
-    window := sdl.CreateWindow("Odin sdl2 Wayland Demo", sdl.
-    WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, sdl.WINDOW_VULKAN)
+    window := sdl.CreateWindow("Odin sdl2 Wayland Demo", sdl.WINDOWPOS_UNDEFINED, 
+    sdl.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, {.VULKAN, .RESIZABLE})
 
     fmt.println(window)
     if window == nil {
@@ -169,31 +218,55 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
     if result != .SUCCESS {
         panic("Failed to enumerate physical devices!");
     }
-    for device in devices {
-        if isDeviceSuitable(device, ctx) {
-            physicalDevice = device
-            break
+ 
+    suitability :: proc(using ctx: ^Context, dev: vk.PhysicalDevice) -> int {
+        props: vk.PhysicalDeviceProperties 
+        features: vk.PhysicalDeviceFeatures
+        vk.GetPhysicalDeviceProperties(dev, &props)
+        vk.GetPhysicalDeviceFeatures(dev, &features)
+
+        score := 0
+        if props.deviceType == .DISCRETE_GPU do score += 1000
+        score += cast(int)props.limits.maxImageDimension2D
+
+        if !features.geometryShader do return 0;
+		if !checkDeviceExtensionSupport(dev) do return 0;
+
+        details := querySwapChainSupport(dev, ctx)
+        if len(details.formats) == 0 || len(details.presentModes) == 0 do return 0
+
+        return score
+
+    }
+
+    hiscore := 0
+    for dev in devices {
+        score := suitability(ctx, dev)
+        if score > hiscore {
+            physicalDevice = dev
+            hiscore = score
         }
     }
 
-    if physicalDevice == nil {
+    if hiscore == 0 {
         fmt.println("failed to find a suitable GPU!");
-        return
-    }
+        os.exit(1)
 
+    }
 }
 
 createLogicalDevice :: proc(using ctx: ^Context) {
-    indices := findQueueFamilies(physicalDevice, ctx)
+    findQueueFamilies(ctx)
 
     infos: [dynamic]vk.DeviceQueueCreateInfo
-    uniqueQueueFamilies :[]u32 ={indices.graphicsFamily.?, indices.presentFamily.?}
+    uniqueQueueFamilies := map[int]bool{}
+    for i in queueIndices do uniqueQueueFamilies[i] = true
 
     priority :f32 = 1
-    for family in uniqueQueueFamilies {
+    for family, _ in uniqueQueueFamilies {
         queueCreateInfo: vk.DeviceQueueCreateInfo
         queueCreateInfo.sType = .DEVICE_QUEUE_CREATE_INFO
-        queueCreateInfo.queueFamilyIndex = family
+        queueCreateInfo.queueFamilyIndex = u32(family)
         queueCreateInfo.queueCount = 1
         queueCreateInfo.pQueuePriorities = &priority
         append(&infos, queueCreateInfo)
@@ -201,8 +274,8 @@ createLogicalDevice :: proc(using ctx: ^Context) {
     }
 
     deviceFeatures: vk.PhysicalDeviceFeatures
-
     createInfo: vk.DeviceCreateInfo
+
     createInfo.sType = .DEVICE_CREATE_INFO
     createInfo.queueCreateInfoCount = cast(u32)len(infos) 
     createInfo.pQueueCreateInfos = raw_data(infos)
@@ -222,25 +295,11 @@ createLogicalDevice :: proc(using ctx: ^Context) {
         return 
     }
 
-    vk.GetDeviceQueue(device, indices.graphicsFamily.?, 0, &graphicsQueue);
-    vk.GetDeviceQueue(device, indices.presentFamily.?, 0, &presentQueue);
+    vk.GetDeviceQueue(device, u32(queueIndices[.Graphics]), 0, &graphicsQueue);
+    vk.GetDeviceQueue(device, u32(queueIndices[.Present]), 0, &presentQueue);
 
 }
 
-
-isDeviceSuitable :: proc(targetDevice: vk.PhysicalDevice, using ctx: ^Context) -> bool {
-    indices := findQueueFamilies(targetDevice, ctx)
-
-    extensionsSupported := checkDeviceExtensionSupport(targetDevice)
-
-    ready := false
-    if (extensionsSupported) {
-        swapChainSupport := querySwapChainSupport(targetDevice, ctx)
-        ready = len(swapChainSupport.formats) > 0 && len(swapChainSupport.presentModes) > 0
-    }
-
-    return ready && queueFamilyIndicesIsOk(indices)
-}
 
 checkDeviceExtensionSupport :: proc (device: vk.PhysicalDevice) -> bool {
     count: u32
@@ -252,7 +311,6 @@ checkDeviceExtensionSupport :: proc (device: vk.PhysicalDevice) -> bool {
     requiredExtensions := map[string]bool{} 
 
     for ext in DEVICE_EXTENSIONS do requiredExtensions[string(ext)] = false
-
 
     for &available in availableExtensions {
         requiredExtensions[string(cstring(&available.extensionName[0]))] = true
@@ -267,41 +325,23 @@ checkDeviceExtensionSupport :: proc (device: vk.PhysicalDevice) -> bool {
 
 }
 
-QueueFamilyIndices :: struct {
-    graphicsFamily: Maybe(u32),
-    presentFamily: Maybe(u32),
-}
-
-queueFamilyIndicesIsOk :: proc(indices: QueueFamilyIndices) -> bool {
-    if indices.graphicsFamily != nil && indices.presentFamily != nil {
-        return true;
-    } else {
-        return false;
-    }
-}
-
-findQueueFamilies :: proc(target: vk.PhysicalDevice, using ctx: ^Context) -> QueueFamilyIndices {
-    indices: QueueFamilyIndices;
+findQueueFamilies :: proc(using ctx: ^Context) {
     count: u32;
-    vk.GetPhysicalDeviceQueueFamilyProperties(target, &count, nil)
+    vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &count, nil)
 
     families:= make([]vk.QueueFamilyProperties, count);
-    vk.GetPhysicalDeviceQueueFamilyProperties(target, &count, raw_data(families))
+    vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &count, raw_data(families))
+ 
+    for family, i in families {
+        if .GRAPHICS in family.queueFlags && queueIndices[.Graphics] == -1 do queueIndices[.Graphics] = i
 
-    i:u32 = 0;
-    for family in families {
-        if .GRAPHICS in family.queueFlags{
-            indices.graphicsFamily = i;
-        }
-        presentSupport : b32= false
-        vk.GetPhysicalDeviceSurfaceSupportKHR(target, i, surface, &presentSupport)
-        if presentSupport do indices.presentFamily = i
+        presentSupport : b32 = false
+        vk.GetPhysicalDeviceSurfaceSupportKHR(physicalDevice, u32(i), surface, &presentSupport)
+        if presentSupport && queueIndices[.Present] == -1 do queueIndices[.Present] = i
 
-        if queueFamilyIndicesIsOk(indices) do break
-        i+=1;
+        for q in queueIndices do if q == -1 do continue
     }
-  
-    return indices;
+
 }
 
 createSurface :: proc(using ctx: ^Context) {
@@ -376,7 +416,6 @@ chooseSwapExtent :: proc(using ctx: ^Context, capabilities: ^vk.SurfaceCapabilit
    } 
 }
 
-
 clamp :: proc(value, min, max: u32) -> u32  {
     if value < min {
         return min;
@@ -387,33 +426,32 @@ clamp :: proc(value, min, max: u32) -> u32  {
     return value;
 }  
 
-createSwapChain :: proc(using ctx: ^Context) {
+createSwapchain :: proc(using ctx: ^Context) {
     swapChainSupport := querySwapChainSupport(physicalDevice, ctx)
 
     surfaceFormat := chooseSwapSurfaceFormat(&swapChainSupport.formats)
     presentMode := chooseSwapPresentMode(&swapChainSupport.presentModes)
     extent := chooseSwapExtent(ctx, &swapChainSupport.capabilities)
+    swapchain.imageCount = swapChainSupport.capabilities.minImageCount + 1
 
-    imageCount := swapChainSupport.capabilities.minImageCount + 1
     if swapChainSupport.capabilities.maxImageCount > 0 && 
-    imageCount > swapChainSupport.capabilities.maxImageCount {
-        imageCount = swapChainSupport.capabilities.maxImageCount
+    swapchain.imageCount > swapChainSupport.capabilities.maxImageCount {
+        swapchain.imageCount = swapChainSupport.capabilities.maxImageCount
     }
 
     createInfo: vk.SwapchainCreateInfoKHR
     createInfo.sType = .SWAPCHAIN_CREATE_INFO_KHR
     createInfo.surface = surface
-    createInfo.minImageCount = imageCount;
+    createInfo.minImageCount = swapchain.imageCount;
     createInfo.imageFormat = surfaceFormat.format;
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = {.COLOR_ATTACHMENT};
 
-    indices := findQueueFamilies(physicalDevice, ctx)
-    queueFamilyIndices := []u32{indices.graphicsFamily.?, indices.presentFamily.?}
+    queueFamilyIndices := [len(QueueFamily)]u32{cast(u32)queueIndices[.Graphics], cast(u32)queueIndices[.Present]} 
 
-    if indices.graphicsFamily != indices.presentFamily {
+    if queueIndices[.Graphics] != queueIndices[.Present] {
         createInfo.imageSharingMode = .CONCURRENT
         createInfo.queueFamilyIndexCount = 2
         createInfo.pQueueFamilyIndices = &queueFamilyIndices[0]
@@ -429,11 +467,372 @@ createSwapChain :: proc(using ctx: ^Context) {
     createInfo.clipped = true
     createInfo.oldSwapchain = vk.SwapchainKHR{};
 
-    if vk.CreateSwapchainKHR(device, &createInfo, nil, &swapchain) != .SUCCESS {
+    if vk.CreateSwapchainKHR(device, &createInfo, nil, &swapchain.handle) != .SUCCESS {
         fmt.eprintln("failed to create swapchain")
-        return
+        os.exit(1);
     }
 
+    vk.GetSwapchainImagesKHR(device, swapchain.handle, &swapchain.imageCount, nil);
+	swapchain.images = make([]vk.Image, swapchain.imageCount)
+	vk.GetSwapchainImagesKHR(device, swapchain.handle, &swapchain.imageCount, raw_data(swapchain.images));
+
+    swapchain.format = surfaceFormat.format 
+    swapchain.extent = extent
+
+}
+
+createImageViews :: proc(using ctx: ^Context) {
+    using ctx.swapchain
+    imageViews = make([]vk.ImageView, len(images))
+
+    for _, i in images {
+        createInfo: vk.ImageViewCreateInfo
+        createInfo.sType = .IMAGE_VIEW_CREATE_INFO
+        createInfo.image = images[i]
+        createInfo.viewType = .D2
+        createInfo.format = format
+        createInfo.components.r = .IDENTITY
+        createInfo.components.g = .IDENTITY
+        createInfo.components.b = .IDENTITY
+        createInfo.components.a = .IDENTITY
+        createInfo.subresourceRange.aspectMask = {.COLOR}
+        createInfo.subresourceRange.baseMipLevel = 0
+        createInfo.subresourceRange.levelCount = 1
+        createInfo.subresourceRange.baseArrayLayer = 0
+        createInfo.subresourceRange.layerCount = 1
+
+        if vk.CreateImageView(device, &createInfo, nil, &imageViews[i]) != .SUCCESS {
+            fmt.eprintf("Failed to create image views for index %d \n", i)
+            os.exit(1)
+        }
+    }
+
+}
+
+createGraphicsPipeline :: proc(using ctx: ^Context) {
+
+    createShaderModule :: proc(data: []u8, device: vk.Device) -> vk.ShaderModule {
+        createInfo : vk.ShaderModuleCreateInfo
+        createInfo.sType = .SHADER_MODULE_CREATE_INFO
+        createInfo.codeSize = len(data)
+        createInfo.pCode = cast(^u32)raw_data(data)
+
+        shaderModule : vk.ShaderModule
+        if vk.CreateShaderModule(device, &createInfo, nil, &shaderModule) != .SUCCESS {
+            fmt.println("failed to create shader module")
+            os.exit(1) 
+        }
+
+        return shaderModule
+    }
+
+    vert, ok := os.read_entire_file_from_filename("shaders/vert.spv")
+    if !ok {
+        return
+    }
+    defer delete(vert)
+    frag :[]u8
+    frag,ok = os.read_entire_file_from_filename("shaders/frag.spv")
+    if !ok {
+        return
+    }
+    defer delete(frag)
+
+    vModule := createShaderModule(vert, device)
+    fModule := createShaderModule(frag, device)
+
+    defer vk.DestroyShaderModule(device, vModule, nil)
+    defer vk.DestroyShaderModule(device, fModule, nil)
+
+    dynamicStates := [?]vk.DynamicState{.VIEWPORT, .SCISSOR};
+    dynamicState : vk.PipelineDynamicStateCreateInfo
+    dynamicState.sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO
+    dynamicState.dynamicStateCount = len(dynamicStates)
+    dynamicState.pDynamicStates = &dynamicStates[0]
+
+    vertShaderStageInfo: vk.PipelineShaderStageCreateInfo
+    vertShaderStageInfo.sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
+    vertShaderStageInfo.stage = {.VERTEX}
+    vertShaderStageInfo.module = vModule 
+    vertShaderStageInfo.pName = "main"
+
+    fragShaderStageInfo: vk.PipelineShaderStageCreateInfo
+    fragShaderStageInfo.sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
+    fragShaderStageInfo.stage = {.FRAGMENT}
+    fragShaderStageInfo.module = fModule 
+    fragShaderStageInfo.pName = "main"
+
+    shaderStages :  = []vk.PipelineShaderStageCreateInfo{vertShaderStageInfo, fragShaderStageInfo}
+
+    vertexInputInfo : vk.PipelineVertexInputStateCreateInfo
+    vertexInputInfo.sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+    vertexInputInfo.vertexBindingDescriptionCount = 0.0
+    vertexInputInfo.pVertexBindingDescriptions = nil
+    vertexInputInfo.vertexAttributeDescriptionCount = 0.0
+    vertexInputInfo.pVertexAttributeDescriptions = nil
+
+    inputAssembly: vk.PipelineInputAssemblyStateCreateInfo
+    inputAssembly.sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
+    inputAssembly.topology = .TRIANGLE_LIST
+    inputAssembly.primitiveRestartEnable = false
+    
+    viewport : vk.Viewport
+    viewport.x = 0.0
+    viewport.y = 0.0
+    viewport.width = cast(f32)swapchain.extent.width
+    viewport.height = cast(f32)swapchain.extent.height
+    viewport.minDepth = 0.0
+    viewport.maxDepth = 1.0
+
+    scissor: vk.Rect2D
+    scissor.offset = {0, 0}
+    scissor.extent = {0, 0}
+
+    viewportState: vk.PipelineViewportStateCreateInfo
+    viewportState.sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO
+    viewportState.viewportCount = 1.0
+    viewportState.pViewports = &viewport
+    viewportState.scissorCount = 1.0
+    viewportState.pScissors = &scissor
+
+    rasterizer: vk.PipelineRasterizationStateCreateInfo
+    rasterizer.sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+    rasterizer.depthClampEnable = false 
+    rasterizer.rasterizerDiscardEnable = false
+    rasterizer.polygonMode = .FILL 
+    rasterizer.lineWidth = 1.0
+    rasterizer.cullMode = {.BACK}
+    rasterizer.frontFace = .CLOCKWISE 
+    rasterizer.depthBiasEnable = false 
+    rasterizer.depthBiasConstantFactor = 0.0
+    rasterizer.depthBiasClamp = 0.0 
+    rasterizer.depthBiasSlopeFactor = 0.0 
+
+    multisampling: vk.PipelineMultisampleStateCreateInfo
+    multisampling.sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+    multisampling.sampleShadingEnable = false
+    multisampling.rasterizationSamples = {._1}
+    multisampling.minSampleShading = 1.0
+    multisampling.pSampleMask = nil 
+    multisampling.alphaToCoverageEnable = false 
+    multisampling.alphaToOneEnable = false 
+
+    colorBlendAttachments: vk.PipelineColorBlendAttachmentState
+    colorBlendAttachments.colorWriteMask = {.R, .G, .B, .A}
+    colorBlendAttachments.blendEnable = false 
+    colorBlendAttachments.srcColorBlendFactor = .ONE
+    colorBlendAttachments.dstColorBlendFactor = .ZERO
+    colorBlendAttachments.colorBlendOp = .ADD 
+    colorBlendAttachments.srcAlphaBlendFactor = .ONE 
+    colorBlendAttachments.dstAlphaBlendFactor = .ZERO 
+    colorBlendAttachments.alphaBlendOp = .ADD
+
+    colorBlending: vk.PipelineColorBlendStateCreateInfo 
+    colorBlending.sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+    colorBlending.logicOpEnable = false 
+    colorBlending.logicOp = .COPY 
+    colorBlending.attachmentCount = 1
+    colorBlending.pAttachments = &colorBlendAttachments
+    colorBlending.blendConstants[0] = 0.0
+    colorBlending.blendConstants[1] = 0.0
+    colorBlending.blendConstants[2] = 0.0
+    colorBlending.blendConstants[3] = 0.0
+
+    pipelineLayoutInfo: vk.PipelineLayoutCreateInfo 
+    pipelineLayoutInfo.sType = .PIPELINE_LAYOUT_CREATE_INFO
+    pipelineLayoutInfo.setLayoutCount = 0 
+    pipelineLayoutInfo.pSetLayouts = nil
+    pipelineLayoutInfo.pushConstantRangeCount = 0 
+    pipelineLayoutInfo.pPushConstantRanges = nil 
+
+    if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &pipelineLayout) != .SUCCESS {
+        fmt.println("failed to pipeline layout")
+        os.exit(1) 
+    }
+
+    pipelineInfo : vk.GraphicsPipelineCreateInfo
+    pipelineInfo.sType = .GRAPHICS_PIPELINE_CREATE_INFO
+    pipelineInfo.stageCount = 2
+    pipelineInfo.pStages = &shaderStages[0]
+    pipelineInfo.pVertexInputState = &vertexInputInfo
+    pipelineInfo.pInputAssemblyState = &inputAssembly
+    pipelineInfo.pViewportState = &viewportState
+    pipelineInfo.pRasterizationState = &rasterizer 
+    pipelineInfo.pMultisampleState = &multisampling
+    pipelineInfo.pDepthStencilState = nil
+    pipelineInfo.pColorBlendState = &colorBlending
+    pipelineInfo.pDynamicState = &dynamicState
+    pipelineInfo.layout = pipelineLayout
+    pipelineInfo.renderPass = renderPass 
+    pipelineInfo.subpass = 0
+    pipelineInfo.basePipelineHandle = vk.Pipeline{}
+    pipelineInfo.basePipelineIndex = -1
+
+    if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &graphicsPipeline) != .SUCCESS {
+        fmt.println("failed to pipeline")
+        os.exit(1) 
+    }
+
+}
+
+createRenderPass :: proc(using ctx: ^Context) {
+    colorAttachment: vk.AttachmentDescription
+    colorAttachment.format = swapchain.format
+    colorAttachment.samples = {._1}
+    colorAttachment.loadOp = .CLEAR 
+    colorAttachment.storeOp = .STORE 
+    colorAttachment.stencilLoadOp = .DONT_CARE
+    colorAttachment.stencilStoreOp = .DONT_CARE
+    colorAttachment.initialLayout = .UNDEFINED 
+    colorAttachment.finalLayout = .PRESENT_SRC_KHR
+
+    colorAttachmentRef: vk.AttachmentReference
+    colorAttachmentRef.attachment = 0
+    colorAttachmentRef.layout = .COLOR_ATTACHMENT_OPTIMAL
+
+    subpass : vk.SubpassDescription
+    subpass.pipelineBindPoint = .GRAPHICS
+    subpass.colorAttachmentCount = 1
+    subpass.pColorAttachments = &colorAttachmentRef
+
+    dependency: vk.SubpassDependency
+    dependency.srcSubpass = vk.SUBPASS_EXTERNAL
+    dependency.dstSubpass = 0
+    dependency.srcStageMask = {.COLOR_ATTACHMENT_OUTPUT}
+    dependency.srcAccessMask = {}
+    dependency.dstStageMask = {.COLOR_ATTACHMENT_OUTPUT}
+    dependency.dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
+    
+
+    renderPassInfo : vk.RenderPassCreateInfo
+    renderPassInfo.sType = .RENDER_PASS_CREATE_INFO
+    renderPassInfo.attachmentCount = 1
+    renderPassInfo.pAttachments = &colorAttachment
+    renderPassInfo.subpassCount = 1
+    renderPassInfo.pSubpasses = &subpass
+    renderPassInfo.dependencyCount = 1
+    renderPassInfo.pDependencies = &dependency
+
+    if vk.CreateRenderPass(device, &renderPassInfo, nil, &renderPass) != .SUCCESS {
+        fmt.eprintln("failed to render pass")
+        os.exit(1);
+    }
+
+}
+
+createFrameBuffers :: proc(using ctx: ^Context) {
+    swapchain.framebuffers = make([]vk.Framebuffer, len(swapchain.imageViews))
+
+    for i in 0..<len(swapchain.imageViews) {
+        attachments := swapchain.imageViews[i]
+
+        framebufferInfo: vk.FramebufferCreateInfo
+        framebufferInfo.sType = .FRAMEBUFFER_CREATE_INFO
+        framebufferInfo.renderPass = renderPass 
+        framebufferInfo.attachmentCount = 1
+        framebufferInfo.pAttachments = &attachments 
+        framebufferInfo.width = swapchain.extent.width
+        framebufferInfo.height = swapchain.extent.height
+        framebufferInfo.layers = 1
+
+        if vk.CreateFramebuffer(device, &framebufferInfo, nil, &swapchain.framebuffers[i]) != .SUCCESS{
+            fmt.eprintf("Failed to create fram buffer for index %d \n", i)
+            os.exit(1)
+        }
+    }
+}
+
+createCommandPool :: proc(using ctx: ^Context) {
+    poolInfo : vk.CommandPoolCreateInfo
+    poolInfo.sType = .COMMAND_POOL_CREATE_INFO 
+    poolInfo.flags = {.RESET_COMMAND_BUFFER}
+    poolInfo.queueFamilyIndex = u32(queueIndices[.Graphics])
+
+    if vk.CreateCommandPool(device, &poolInfo, nil, &commandPool) != .SUCCESS {
+        fmt.eprintln("failed to create command pool")
+        os.exit(1)
+    }
+}
+
+createCommandBuffers :: proc(using ctx: ^Context) {
+    allocInfo: vk.CommandBufferAllocateInfo
+    allocInfo.sType = .COMMAND_BUFFER_ALLOCATE_INFO
+    allocInfo.commandPool = commandPool 
+    allocInfo.level = .PRIMARY
+    allocInfo.commandBufferCount = MAX_FRAMES_IN_FLIGHT
+
+    if vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[0]) != .SUCCESS {
+        fmt.eprintln("failed to create command buffer")
+        os.exit(1)
+    }
+}
+
+recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
+    beginInfo: vk.CommandBufferBeginInfo
+    beginInfo.sType = .COMMAND_BUFFER_BEGIN_INFO
+    beginInfo.pInheritanceInfo = nil
+
+    if vk.BeginCommandBuffer(buffer, &beginInfo) != .SUCCESS {
+        fmt.eprintln("failed to begin to record command buffer")
+        os.exit(1)
+    }
+
+    renderPassInfo: vk.RenderPassBeginInfo 
+    renderPassInfo.sType = .RENDER_PASS_BEGIN_INFO
+    renderPassInfo.renderPass = renderPass
+    renderPassInfo.framebuffer = swapchain.framebuffers[imageIndex]
+    renderPassInfo.renderArea.offset = {0, 0}
+    renderPassInfo.renderArea.extent = swapchain.extent
+
+    clearColor : vk.ClearValue
+    clearColor.color.float32 = [4]f32{0.0, 0.0, 0.0, 1.0}
+    renderPassInfo.clearValueCount = 1
+    renderPassInfo.pClearValues = &clearColor
+    
+    vk.CmdBeginRenderPass(buffer, &renderPassInfo, .INLINE)
+    vk.CmdBindPipeline(buffer, .GRAPHICS, graphicsPipeline)
+
+    viewport : vk.Viewport
+    viewport.x = 0.0
+    viewport.y = 0.0
+    viewport.width = cast(f32)swapchain.extent.width
+    viewport.height = cast(f32)swapchain.extent.height
+    viewport.minDepth = 0.0
+    viewport.maxDepth = 1.0
+    vk.CmdSetViewport(buffer, 0, 1, &viewport)
+
+    scissor : vk.Rect2D 
+    scissor.offset = {0, 0}
+    scissor.extent = swapchain.extent
+    vk.CmdSetScissor(buffer, 0, 1, &scissor)
+
+    vk.CmdDraw(buffer, 3, 1, 0, 0)
+    vk.CmdEndRenderPass(buffer)
+
+    if vk.EndCommandBuffer(buffer) != .SUCCESS {
+        fmt.eprintln("failed to record command buffer")
+        os.exit(1)
+    }
+
+}
+
+createSyncObjects :: proc(using ctx: ^Context) {
+    semaphoreInfo: vk.SemaphoreCreateInfo
+    semaphoreInfo.sType = .SEMAPHORE_CREATE_INFO
+
+    fenceInfo: vk.FenceCreateInfo
+    fenceInfo.sType = .FENCE_CREATE_INFO
+    fenceInfo.flags = {.SIGNALED}
+
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        if vk.CreateSemaphore(device, &semaphoreInfo, nil, &imageAvailableSemaphores[i]) != .SUCCESS ||
+        vk.CreateSemaphore(device, &semaphoreInfo, nil, &renderFinishedSemaphores[i]) != .SUCCESS ||
+        vk.CreateFence(device, &fenceInfo, nil, &inFlightFences[i]) != .SUCCESS {
+            fmt.eprintln("failed to create semaphores")
+            os.exit(1)
+        }
+    }
+  
 }
 
 initVulkan :: proc(using ctx: ^Context) {
@@ -453,7 +852,30 @@ initVulkan :: proc(using ctx: ^Context) {
     createSurface(ctx)
     pickPhysicalDevice(ctx)
     createLogicalDevice(ctx)
-    createSwapChain(ctx)
+    createSwapchain(ctx)
+    createImageViews(ctx)
+    findQueueFamilies(ctx)
+    createRenderPass(ctx)
+    createGraphicsPipeline(ctx)
+    createFrameBuffers(ctx)
+    createCommandPool(ctx)
+    createCommandBuffers(ctx)
+    createSyncObjects(ctx)
+
+}
+
+recreateSwapchain :: proc(using ctx: ^Context) {
+    windowSurface := sdl.GetWindowSurface(window)
+    if (windowSurface.h == 0 || windowSurface.w == 0) {
+        sdl.GetWindowSurface(window)
+    }
+    vk.DeviceWaitIdle(device)
+
+    cleanSwapchain(ctx)
+
+    createSwapchain(ctx)
+    createImageViews(ctx)
+    createFrameBuffers(ctx)
 
 }
 
@@ -513,11 +935,96 @@ run :: proc(using ctx: ^Context) {
                     break loop
             }            
          }
+         drawFrame(ctx)
     }
+
+    vk.DeviceWaitIdle(device)
+}
+
+drawFrame :: proc(using ctx: ^Context) {
+    vk.WaitForFences(device, 1, &inFlightFences[currentFrame], true, max(u64))
+    vk.ResetFences(device, 1, &inFlightFences[currentFrame])
+
+    imageIndex: u32
+    res := vk.AcquireNextImageKHR(device, swapchain.handle, max(u64), imageAvailableSemaphores[currentFrame], {}, &imageIndex)
+    if res == .ERROR_OUT_OF_DATE_KHR {
+        recreateSwapchain(ctx)
+        return
+    } else if res != .SUCCESS && res != .SUBOPTIMAL_KHR {
+        fmt.eprintln("failed to acquire swapchain image")
+        os.exit(1)
+    }
+
+    vk.ResetFences(device, 1, &inFlightFences[currentFrame])
+
+    vk.ResetCommandBuffer(commandBuffers[currentFrame], {})
+    recordCommandBuffer(ctx, commandBuffers[currentFrame], imageIndex)
+
+    waitSemaphores := [?]vk.Semaphore{imageAvailableSemaphores[currentFrame]}
+    waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
+
+    submitInfo : vk.SubmitInfo 
+    submitInfo.sType = .SUBMIT_INFO
+    submitInfo.waitSemaphoreCount = 1
+    submitInfo.pWaitSemaphores= &waitSemaphores[0] 
+    submitInfo.pWaitDstStageMask = &waitStages[0]
+    submitInfo.commandBufferCount = 1
+    submitInfo.pCommandBuffers = &commandBuffers[currentFrame] 
+
+    signalSemaphores := [?]vk.Semaphore{renderFinishedSemaphores[currentFrame]}
+    submitInfo.signalSemaphoreCount = 1
+    submitInfo.pSignalSemaphores = &signalSemaphores[0]
+
+    if vk.QueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != .SUCCESS {
+        fmt.eprintln("failed to submit draw command buffer")
+        os.exit(1)
+    }
+
+    presentInfo : vk.PresentInfoKHR
+    presentInfo.sType = .PRESENT_INFO_KHR
+    presentInfo.waitSemaphoreCount = 1
+    presentInfo.pWaitSemaphores = &signalSemaphores[0]
+
+    swapchains := [?]vk.SwapchainKHR{swapchain.handle}
+    presentInfo.swapchainCount = 1
+    presentInfo.pSwapchains = &swapchains[0]
+    presentInfo.pImageIndices = &imageIndex 
+    presentInfo.pResults = nil 
+
+    res = vk.QueuePresentKHR(presentQueue, &presentInfo)
+    if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR || framebufferResized{
+        framebufferResized = false
+        recreateSwapchain(ctx)
+    } else if res != .SUCCESS {
+        fmt.eprintln("failed to present swapchain image")
+        os.exit(1)
+    }
+
+    currentFrame = (currentFrame + 1) & MAX_FRAMES_IN_FLIGHT
+
+}
+
+cleanSwapchain :: proc(using ctx: ^Context) {
+    for fb in swapchain.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
+    for view in swapchain.imageViews do vk.DestroyImageView(device, view, nil)
+    vk.DestroySwapchainKHR(device, swapchain.handle, nil)
+
 }
 
 exit :: proc(using ctx: ^Context) {
-    vk.DestroySwapchainKHR(device, swapchain, nil)
+    cleanSwapchain(ctx)   
+
+    vk.DestroyPipeline(device, graphicsPipeline, nil)
+    vk.DestroyPipelineLayout(device, pipelineLayout, nil)
+    vk.DestroyRenderPass(device, renderPass, nil)
+
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        vk.DestroySemaphore(device, imageAvailableSemaphores[i], nil);
+        vk.DestroySemaphore(device, renderFinishedSemaphores[i], nil);
+        vk.DestroyFence(device, inFlightFences[i], nil);
+    }
+   
+    vk.DestroyCommandPool(device, commandPool, nil)   
     vk.DestroyDevice(device, nil)
     when ODIN_DEBUG {
        DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nil)
@@ -529,8 +1036,16 @@ exit :: proc(using ctx: ^Context) {
 }
 
 main :: proc() {
-    ctx: Context = Context {}
+
+    vertices := [?]Vertex{
+        {{0.0, -0.5}, {1.0, 0.0, 0.0}},
+        {{0.5, 0.5}, {0.0, 1.0, 0.0}},
+        {{-0.5, 0.5}, {0.0, 0.0, 1.0}},
+    }
+
+    using ctx: Context
     initWindow(&ctx)
+    for &q in queueIndices do q = -1
     initVulkan(&ctx)
     defer exit(&ctx);
 
