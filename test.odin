@@ -637,7 +637,7 @@ createGraphicsPipeline :: proc(using ctx: ^Context) {
     rasterizer.polygonMode = .FILL 
     rasterizer.lineWidth = 1.0
     rasterizer.cullMode = {.BACK}
-    rasterizer.frontFace = .CLOCKWISE 
+    rasterizer.frontFace = .COUNTER_CLOCKWISE 
     rasterizer.depthBiasEnable = false 
 
     multisampling: vk.PipelineMultisampleStateCreateInfo
@@ -929,7 +929,7 @@ createDescriptorSetLayout :: proc(using ctx: ^Context) {
 
 createTextureImage :: proc(using ctx: ^Context) {
 
-    f := libc.fopen("textures/statue640x480.jpg", "rb")
+    f := libc.fopen("textures/Material_294_baseColor.png", "rb")
     if f == nil {
         fmt.eprintln("failed to fopen")
         os.exit(1)
@@ -1201,6 +1201,91 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
 
     }
 
+    Primitive :: struct {
+        firstIndex: u32,
+        indexCount: u32,
+    }
+
+    Mesh :: struct {
+        primitives: []Primitive
+    }
+
+    Material :: struct {
+        baseColorFactor: [4]f32,
+        baseColorTextureIndex: u32
+    }
+
+    loadGlbModel :: proc(using ctx: ^Context) -> ([]Vertex, []u16) {
+        // Parse the gltf file
+        data, res := cgltf.parse_file({}, "glbs/BoxTextured.glb");
+        if res != .success {
+            fmt.eprintf("Failed to parse_file: %v\n", res);
+            os.exit(1);
+        }
+        defer cgltf.free(data)
+
+        result := cgltf.load_buffers({}, data, "glbs/BoxTextured.glb")
+        if result != .success {
+            fmt.eprintf("Failed to load_buffers: %v\n", result)
+        }
+
+        vertices: [dynamic]Vertex;
+        indices: [dynamic]u16 ;
+
+        if data == nil || len(data.meshes) == 0 {
+            return vertices[:], indices[:]
+        }
+    
+        for mesh in data.meshes {
+            for primitive in mesh.primitives {
+             
+                // Process vertex positions
+                for i in 0..<len(primitive.attributes) {
+                    attribute := primitive.attributes[i]
+                    accessor := attribute.data
+                
+                    // Read position data
+                    if attribute.type == .position {
+                        for j in 0..<accessor.count {
+                            position := [3]f32{} 
+                            res := cgltf.accessor_read_float(accessor, j, &position[0], 3)
+                            if res == false do fmt.eprintln("pos")
+                            append(&vertices, Vertex{pos=position})
+                        }
+                    }
+                    // Read texcoord data
+                    if attribute.type == .texcoord {
+                        for j in 0..<accessor.count {
+                            texcoord := [2]f32{}; 
+                            res := cgltf.accessor_read_float(accessor, j, &texcoord[0], 2);
+                            if res == false {
+                                fmt.eprintln("Failed to read texcoord at index: ", j);
+                            }
+                            vertices[j].texCoord = texcoord; 
+                            vertices[j].color = {1.0, 1.0, 1.0}; 
+                        }
+                    }            
+                }
+
+        
+           // Extract indices
+           if primitive.indices != nil {
+               index_accessor := primitive.indices;
+               for i in 0..<index_accessor.count {
+                   idx := cgltf.accessor_read_index(index_accessor, i);
+                   append(&indices, cast(u16)idx);
+               }
+           }
+       }
+   }
+      
+        fmt.println(len(vertices))
+        fmt.println(len(indices))
+
+        return vertices[:], indices[:]
+    }
+    
+
     initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     start = time.now()
     getInstanceProcAddr := sdl.Vulkan_GetVkGetInstanceProcAddr()
@@ -1216,6 +1301,9 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
     for _, i in extensions do fmt.println(cstring(&extensions[i].extensionName[0]))
 
     createSurface(ctx)
+
+    v, i := loadGlbModel(ctx)
+
     pickPhysicalDevice(ctx)
     createLogicalDevice(ctx)
     createSwapchain(ctx)
@@ -1230,8 +1318,8 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
     createTextureImage(ctx)
     createTextureImageView(ctx)
     createTextureSampler(ctx)
-    createVertexBuffer(ctx, vertices)
-    createIndexBuffer(ctx, indices)
+    createVertexBuffer(ctx, v)
+    createIndexBuffer(ctx, i)
     createUniformBuffers(ctx)
     createCommandBuffers(ctx)
     createDescriptorPool(ctx)
@@ -1626,14 +1714,15 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     ubo.view = linalg.matrix4_look_at_f32(
         linalg.Vector3f32{2, 2, 2}, 
         linalg.Vector3f32{0, 0, 0}, 
-        linalg.Vector3f32{0, 0, 1}, false)
+        linalg.Vector3f32{0, 0, 1}, true)
     ubo.proj = linalg.matrix4_perspective(
-        math.to_radians_f32(45.0),
+        math.to_radians_f32(60.0),
          cast(f32)swapchain.extent.width / cast(f32)swapchain.extent.height, 
          0.1, 
-         10.0,
-         false
+         1000.0,
+         true
         )
+    ubo.proj[1][1] *= -1
     mem.copy(uniformBuffersMapped[currentImage], &ubo, size_of(ubo));
 }
 
