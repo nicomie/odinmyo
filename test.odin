@@ -7,8 +7,10 @@ import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 import "core:mem"
 import "core:time"
+import "core:strings"
 import "core:math/linalg"
 import "core:math"
+import "core:encoding/endian"
 import "core:c/libc"
 import "vendor:stb/image"
 import "vendor:cgltf"
@@ -30,6 +32,7 @@ DEVICE_EXTENSIONS := [?]cstring{
 MAX_FRAMES_IN_FLIGHT :: 2
 
 Context :: struct {
+    uri: cstring,
     start : time.Time,
     window: ^sdl.Window,
     instance: vk.Instance,
@@ -61,11 +64,13 @@ Context :: struct {
     descriptorPool: vk.DescriptorPool,
     descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 
+    mipLevels: u32,
     texture: Image,
     textureImageView: vk.ImageView,
     textureSampler: vk.Sampler,
 
     depthImage: DepthImage
+
 
 }
 
@@ -927,19 +932,123 @@ createDescriptorSetLayout :: proc(using ctx: ^Context) {
     }
 }
 
+generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image, w,h: i32) {
+
+    formatProperties : vk.FormatProperties
+    vk.GetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties)
+
+    if (formatProperties.optimalTilingFeatures & vk.FormatFeatureFlags{vk.FormatFeatureFlag.SAMPLED_IMAGE_FILTER_LINEAR} == vk.FormatFeatureFlags{}) {
+        fmt.eprintln("texture image format does not support linear blitting!")
+        os.exit(1)
+    }
+
+    commandBuffer := beginCommand(ctx);
+    defer endCommand(ctx, &commandBuffer)
+
+    barrier := vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        image = image,
+        srcQueueFamilyIndex = 0,
+        dstQueueFamilyIndex = 0,
+        subresourceRange = {
+            aspectMask = {.COLOR},
+            baseArrayLayer = 0,
+            layerCount = 1,
+            levelCount = 1
+        }
+    }
+
+    mipW := w
+    mipH := h
+    for i in 1..<mipLevels {
+        barrier.subresourceRange.baseMipLevel = i - 1
+        barrier.oldLayout = .TRANSFER_DST_OPTIMAL
+        barrier.newLayout = .TRANSFER_SRC_OPTIMAL
+        barrier.srcAccessMask = {.TRANSFER_WRITE}
+        barrier.dstAccessMask = {.TRANSFER_READ}
+
+        vk.CmdPipelineBarrier(commandBuffer, {.TRANSFER}, {.TRANSFER}, {} , 0, nil, 0, nil, 1, &barrier)
+
+
+
+        blit := vk.ImageBlit{
+            srcOffsets = [2]vk.Offset3D{
+                {
+                    0,
+                    0,
+                    0
+                },
+                {
+                    mipW, 
+                    mipH, 
+                    1
+                }
+            },
+            srcSubresource = {
+                aspectMask = {.COLOR},
+                mipLevel = i - 1,
+                baseArrayLayer = 0,
+                layerCount = 1,
+            },
+            dstOffsets =  [2]vk.Offset3D{
+                {
+                    0,
+                    0,
+                    0
+                },
+                {
+                    mipW > 1 ? mipW/2 : 1,
+                    mipH > 1 ? mipH/2 : 1,
+                    1
+                }
+            },
+            dstSubresource = {
+                aspectMask = {.COLOR},
+                mipLevel = i,
+                baseArrayLayer = 0,
+                layerCount = 1
+            }
+        }
+
+        vk.CmdBlitImage(commandBuffer, image, .TRANSFER_SRC_OPTIMAL, image, .TRANSFER_DST_OPTIMAL, 1, &blit, .LINEAR)
+
+        barrier.oldLayout = .TRANSFER_SRC_OPTIMAL
+        barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
+        barrier.srcAccessMask = {.TRANSFER_READ}
+        barrier.dstAccessMask = {.SHADER_READ}
+
+        vk.CmdPipelineBarrier(commandBuffer, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
+
+        if mipW > 1 do mipW /= 2
+        if mipH> 1 do mipH /=2
+    }
+
+    barrier.subresourceRange.baseMipLevel = mipLevels -1
+    barrier.oldLayout = .TRANSFER_DST_OPTIMAL
+    barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
+    barrier.srcAccessMask = {.TRANSFER_WRITE}
+    barrier.dstAccessMask = {.SHADER_READ}
+
+    vk.CmdPipelineBarrier(commandBuffer, {.TRANSFER}, {.FRAGMENT_SHADER}, {}, 0, nil, 0, nil, 1, &barrier)
+}
+
+
 createTextureImage :: proc(using ctx: ^Context) {
 
-    f := libc.fopen("textures/Material_294_baseColor.png", "rb")
+    f := libc.fopen(uri, "rb")
     if f == nil {
-        fmt.eprintln("failed to fopen")
+        fmt.eprintf("failed to fopen file \n", uri)
         os.exit(1)
     }
     defer libc.fclose(f)
 
     w, h, channels: i32 
     
-    loadedImage := image.load_from_file(f, &w, &h, &channels, 4)
-    defer image.image_free(loadedImage)
+    loadedImage := image.load_from_file(f, &w, &h, &channels, 4); defer image.image_free(loadedImage)
+
+    max :=  w > h ? h : w
+    mipLevels = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
+
     if loadedImage == nil {
         fmt.eprintln("failed to load image via load_from_file")
         os.exit(1)
@@ -957,10 +1066,10 @@ createTextureImage :: proc(using ctx: ^Context) {
     vk.UnmapMemory(device, stagingBuffer.memory)
 
  
-    createImage(ctx, w32, h32, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
+    createImage(ctx, w32, h32, mipLevels, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
     transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
     copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32)
-    transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.texture, w, h)
 
     vk.DestroyBuffer(device, stagingBuffer.buffer, nil)
     vk.FreeMemory(device, stagingBuffer.memory, nil)
@@ -1013,7 +1122,7 @@ transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.F
     barrier.dstQueueFamilyIndex = 0;
     barrier.subresourceRange.aspectMask = {.COLOR}
     barrier.subresourceRange.baseMipLevel = 0
-    barrier.subresourceRange.levelCount = 1
+    barrier.subresourceRange.levelCount = mipLevels
     barrier.subresourceRange.baseArrayLayer = 0
     barrier.subresourceRange.layerCount = 1
     barrier.srcAccessMask = {}
@@ -1062,7 +1171,7 @@ copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
     }
 
 
-createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: vk.ImageTiling, 
+createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tiling: vk.ImageTiling, 
     usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
     
         imageInfo := vk.ImageCreateInfo{
@@ -1073,7 +1182,7 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
                 height = h,
                 depth = 1,
             },
-            mipLevels = 1,
+            mipLevels = mips,
             arrayLayers = 1,
             format = format,
             tiling = tiling,
@@ -1121,7 +1230,7 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
             subresourceRange = {
                 aspectMask = aspectFlags,
                 baseMipLevel = 0,
-                levelCount = 1,
+                levelCount = mipLevels,
                 baseArrayLayer = 0,
                 layerCount = 1, 
             }
@@ -1153,6 +1262,9 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
             compareEnable = false,
             compareOp = .ALWAYS,
             mipmapMode = .LINEAR,
+            minLod =  0,
+            maxLod = 1,
+            mipLodBias = 0.0,
         }
 
         if vk.CreateSampler(device, &samplerInfo, nil, &textureSampler) != .SUCCESS {
@@ -1194,7 +1306,7 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
 
     createDepthResource ::proc(using ctx: ^Context) {
         depthFormat := findDepthFormat(physicalDevice)
-        createImage(ctx, swapchain.extent.width, swapchain.extent.height, depthFormat, 
+        createImage(ctx, swapchain.extent.width, swapchain.extent.height, mipLevels, depthFormat, 
         .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
         depthImage.view = createImageView(ctx, depthImage.image.texture, depthFormat, {.DEPTH})
 
@@ -1215,18 +1327,46 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
         baseColorTextureIndex: u32
     }
 
+    loadTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
+        s := [?]string{"textures/", string(data.images[0].uri)}
+        uri = strings.clone_to_cstring(strings.concatenate(s[:]))
+    }
+
+    extractVertexColor :: proc(data: ^cgltf.data) {
+        for mesh in data.meshes {
+            for primitive in mesh.primitives {
+                for attribute in primitive.attributes {
+                    if attribute.type == cgltf.attribute_type.color {
+                        accessor := attribute.data;
+        
+    
+                        for i in 0..<accessor.count {
+                            color: [4]f32;
+                            res:=cgltf.accessor_read_float(accessor, i, &color[0], 4);
+                            fmt.printf("Vertex Color: R=%f G=%f B=%f A=%f\n", color[0], color[1], color[2], color[3]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     loadGlbModel :: proc(using ctx: ^Context) -> ([]Vertex, []u16) {
         // Parse the gltf file
-        data, res := cgltf.parse_file({}, "glbs/BoxTextured.glb");
+        data, res := cgltf.parse_file({}, "glbs/BoxTextured.gltf");
         if res != .success {
             fmt.eprintf("Failed to parse_file: %v\n", res);
             os.exit(1);
         }
-        defer cgltf.free(data)
 
-        result := cgltf.load_buffers({}, data, "glbs/BoxTextured.glb")
+        result := cgltf.load_buffers({}, data, "glbs/BoxTextured.gltf")
         if result != .success {
             fmt.eprintf("Failed to load_buffers: %v\n", result)
+        }
+
+        if validationRes := cgltf.validate(data); validationRes != .success {
+            fmt.eprintf("Failed to validate: %v\n", validationRes)
+
         }
 
         vertices: [dynamic]Vertex;
@@ -1235,6 +1375,8 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
         if data == nil || len(data.meshes) == 0 {
             return vertices[:], indices[:]
         }
+
+        loadTextures(ctx, data)
     
         for mesh in data.meshes {
             for primitive in mesh.primitives {
@@ -1267,6 +1409,8 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
                     }            
                 }
 
+
+
         
            // Extract indices
            if primitive.indices != nil {
@@ -1277,13 +1421,17 @@ createImage :: proc(using ctx: ^Context, w,h : u32, format: vk.Format, tiling: v
                }
            }
        }
-   }
-      
-        fmt.println(len(vertices))
-        fmt.println(len(indices))
-
-        return vertices[:], indices[:]
     }
+
+    extractVertexColor(data)
+    fmt.println("after extraction")
+    fmt.println(len(vertices))
+    fmt.println(len(indices))
+
+    cgltf.free(data)
+
+    return vertices[:], indices[:]
+}
     
 
     initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
