@@ -69,8 +69,9 @@ Context :: struct {
     textureImageView: vk.ImageView,
     textureSampler: vk.Sampler,
 
-    depthImage: DepthImage
-
+    depthImage: DepthImage,
+    colorImage: DepthImage,
+    msaa: vk.SampleCountFlags,
 
 }
 
@@ -287,7 +288,7 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
     }
  
     suitability :: proc(using ctx: ^Context, dev: vk.PhysicalDevice) -> int {
-        props: vk.PhysicalDeviceProperties 
+        props: vk.PhysicalDeviceProperties  
         features: vk.PhysicalDeviceFeatures
         vk.GetPhysicalDeviceProperties(dev, &props)
         vk.GetPhysicalDeviceFeatures(dev, &features)
@@ -312,6 +313,7 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
         score := suitability(ctx, dev)
         if score > hiscore {
             physicalDevice = dev
+            msaa = getUsableSampleCount(physicalDevice)
             hiscore = score
         }
     }
@@ -343,6 +345,7 @@ createLogicalDevice :: proc(using ctx: ^Context) {
 
     deviceFeatures: vk.PhysicalDeviceFeatures
     deviceFeatures.samplerAnisotropy = true
+    deviceFeatures.sampleRateShading = true
     createInfo: vk.DeviceCreateInfo
 
     createInfo.sType = .DEVICE_CREATE_INFO
@@ -552,7 +555,7 @@ createImageViews :: proc(using ctx: ^Context) {
     swapchain.imageViews = make([]vk.ImageView, len(swapchain.images))
 
     for _, i in swapchain.images {
-        swapchain.imageViews[i] = createImageView(ctx, swapchain.images[i], swapchain.format, {.COLOR})
+        swapchain.imageViews[i] = createImageView(ctx, swapchain.images[i], swapchain.format, {.COLOR}, 1)
     }
 
 }
@@ -647,8 +650,9 @@ createGraphicsPipeline :: proc(using ctx: ^Context) {
 
     multisampling: vk.PipelineMultisampleStateCreateInfo
     multisampling.sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
-    multisampling.sampleShadingEnable = false
-    multisampling.rasterizationSamples = {._1}
+    multisampling.sampleShadingEnable = true
+    multisampling.minSampleShading = 0.2
+    multisampling.rasterizationSamples = msaa
 
     colorBlendAttachments: vk.PipelineColorBlendAttachmentState
     colorBlendAttachments.colorWriteMask = {.R, .G, .B, .A}
@@ -726,25 +730,43 @@ createRenderPass :: proc(using ctx: ^Context) {
     depthAttachmentRef: vk.AttachmentReference
     depthAttachmentRef.attachment = 1
     depthAttachmentRef.layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    depthAttachment.samples = msaa
 
     colorAttachment: vk.AttachmentDescription
     colorAttachment.format = swapchain.format
-    colorAttachment.samples = {._1}
+    colorAttachment.samples = msaa
     colorAttachment.loadOp = .CLEAR 
     colorAttachment.storeOp = .STORE 
     colorAttachment.stencilLoadOp = .DONT_CARE
     colorAttachment.stencilStoreOp = .DONT_CARE
     colorAttachment.initialLayout = .UNDEFINED 
-    colorAttachment.finalLayout = .PRESENT_SRC_KHR
+    colorAttachment.finalLayout = .COLOR_ATTACHMENT_OPTIMAL
 
     colorAttachmentRef: vk.AttachmentReference
     colorAttachmentRef.attachment = 0
     colorAttachmentRef.layout = .COLOR_ATTACHMENT_OPTIMAL
 
+    colorAttachmentResolve := vk.AttachmentDescription{
+        format = swapchain.format,
+        samples = {._1},
+        loadOp = .DONT_CARE,
+        storeOp = .STORE,
+        stencilLoadOp = .DONT_CARE,
+        stencilStoreOp = .DONT_CARE,
+        initialLayout = .UNDEFINED,
+        finalLayout = .PRESENT_SRC_KHR
+    }
+
+    colorAttachmentResolveRef := vk.AttachmentReference{
+        attachment = 2,
+        layout = .COLOR_ATTACHMENT_OPTIMAL
+    }
+
     subpass : vk.SubpassDescription
     subpass.pipelineBindPoint = .GRAPHICS
     subpass.colorAttachmentCount = 1
     subpass.pColorAttachments = &colorAttachmentRef
+    subpass.pResolveAttachments = &colorAttachmentResolveRef
     subpass.pDepthStencilAttachment = &depthAttachmentRef
 
     dependency: vk.SubpassDependency
@@ -755,7 +777,7 @@ createRenderPass :: proc(using ctx: ^Context) {
     dependency.dstStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS}
     dependency.dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE}
 
-    attachments := []vk.AttachmentDescription{colorAttachment, depthAttachment}
+    attachments := []vk.AttachmentDescription{colorAttachment, depthAttachment, colorAttachmentResolve}
 
     renderPassInfo : vk.RenderPassCreateInfo
     renderPassInfo.sType = .RENDER_PASS_CREATE_INFO
@@ -777,8 +799,8 @@ createFrameBuffers :: proc(using ctx: ^Context) {
     swapchain.framebuffers = make([]vk.Framebuffer, len(swapchain.imageViews))
 
     for i in 0..<len(swapchain.imageViews) {
-        attachments := []vk.ImageView{swapchain.imageViews[i], depthImage.view}
-
+        attachments := []vk.ImageView{colorImage.view, depthImage.view, swapchain.imageViews[i]}
+ 
         framebufferInfo: vk.FramebufferCreateInfo
         framebufferInfo.sType = .FRAMEBUFFER_CREATE_INFO
         framebufferInfo.renderPass = renderPass 
@@ -969,20 +991,10 @@ generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image,
 
         vk.CmdPipelineBarrier(commandBuffer, {.TRANSFER}, {.TRANSFER}, {} , 0, nil, 0, nil, 1, &barrier)
 
-
-
         blit := vk.ImageBlit{
             srcOffsets = [2]vk.Offset3D{
-                {
-                    0,
-                    0,
-                    0
-                },
-                {
-                    mipW, 
-                    mipH, 
-                    1
-                }
+                {0,0,0},
+                {mipW, mipH, 1}
             },
             srcSubresource = {
                 aspectMask = {.COLOR},
@@ -991,16 +1003,8 @@ generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image,
                 layerCount = 1,
             },
             dstOffsets =  [2]vk.Offset3D{
-                {
-                    0,
-                    0,
-                    0
-                },
-                {
-                    mipW > 1 ? mipW/2 : 1,
-                    mipH > 1 ? mipH/2 : 1,
-                    1
-                }
+                {0, 0, 0},
+                {mipW > 1 ? mipW/2 : 1, mipH > 1 ? mipH/2 : 1, 1}
             },
             dstSubresource = {
                 aspectMask = {.COLOR},
@@ -1066,13 +1070,15 @@ createTextureImage :: proc(using ctx: ^Context) {
     vk.UnmapMemory(device, stagingBuffer.memory)
 
  
-    createImage(ctx, w32, h32, mipLevels, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
-    transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+    createImage(ctx, w32, h32, mipLevels, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
+    transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, 1)
     copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32)
-    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.texture, w, h)
 
     vk.DestroyBuffer(device, stagingBuffer.buffer, nil)
     vk.FreeMemory(device, stagingBuffer.memory, nil)
+
+    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.texture, w, h)
+
 }
 
 beginCommand :: proc(using ctx:^Context) -> vk.CommandBuffer{
@@ -1109,7 +1115,7 @@ endCommand :: proc(using ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
     vk.FreeCommandBuffers(device, commandPool, 1, &cmdBuffer^)
 }
 
-transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout) {
+transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout, mips: u32) {
     cmdBuffer := beginCommand(ctx)
     defer endCommand(ctx, &cmdBuffer)
 
@@ -1122,7 +1128,7 @@ transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.F
     barrier.dstQueueFamilyIndex = 0;
     barrier.subresourceRange.aspectMask = {.COLOR}
     barrier.subresourceRange.baseMipLevel = 0
-    barrier.subresourceRange.levelCount = mipLevels
+    barrier.subresourceRange.levelCount = mips
     barrier.subresourceRange.baseArrayLayer = 0
     barrier.subresourceRange.layerCount = 1
     barrier.srcAccessMask = {}
@@ -1148,8 +1154,6 @@ transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.F
     }
 
     vk.CmdPipelineBarrier(cmdBuffer, sourceStage, destinationStage, {}, 0, nil, 0, nil, 1, &barrier)
-
-
 }
 
 copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
@@ -1171,7 +1175,7 @@ copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
     }
 
 
-createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tiling: vk.ImageTiling, 
+createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCountFlags, format: vk.Format, tiling: vk.ImageTiling, 
     usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
     
         imageInfo := vk.ImageCreateInfo{
@@ -1189,7 +1193,7 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
             initialLayout = .UNDEFINED,
             usage = usage,
             sharingMode = .EXCLUSIVE,
-            samples = {._1},
+            samples = numSamples,
             flags = {}
         }
     
@@ -1217,10 +1221,10 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
     }
 
     createTextureImageView :: proc(using ctx: ^Context) {    
-        textureImageView = createImageView(ctx, texture.texture, .R8G8B8A8_SRGB, {.COLOR})
+        textureImageView = createImageView(ctx, texture.texture, .R8G8B8A8_SRGB, {.COLOR}, mipLevels)
     }
 
-    createImageView :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, aspectFlags: vk.ImageAspectFlags
+    createImageView :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, aspectFlags: vk.ImageAspectFlags, mips: u32
     ) -> vk.ImageView {
         viewInfo := vk.ImageViewCreateInfo{
             sType = .IMAGE_VIEW_CREATE_INFO,
@@ -1230,7 +1234,7 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
             subresourceRange = {
                 aspectMask = aspectFlags,
                 baseMipLevel = 0,
-                levelCount = mipLevels,
+                levelCount = mips,
                 baseArrayLayer = 0,
                 layerCount = 1, 
             }
@@ -1262,8 +1266,8 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
             compareEnable = false,
             compareOp = .ALWAYS,
             mipmapMode = .LINEAR,
-            minLod =  0,
-            maxLod = 1,
+            minLod =  0.0,
+            maxLod = f32(mipLevels),
             mipLodBias = 0.0,
         }
 
@@ -1306,9 +1310,9 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
 
     createDepthResource ::proc(using ctx: ^Context) {
         depthFormat := findDepthFormat(physicalDevice)
-        createImage(ctx, swapchain.extent.width, swapchain.extent.height, mipLevels, depthFormat, 
+        createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, msaa, depthFormat, 
         .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
-        depthImage.view = createImageView(ctx, depthImage.image.texture, depthFormat, {.DEPTH})
+        depthImage.view = createImageView(ctx, depthImage.image.texture, depthFormat, {.DEPTH}, 1)
 
 
     }
@@ -1408,9 +1412,6 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
                         }
                     }            
                 }
-
-
-
         
            // Extract indices
            if primitive.indices != nil {
@@ -1432,9 +1433,35 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
 
     return vertices[:], indices[:]
 }
+
+getUsableSampleCount :: proc(physicalDevice: vk.PhysicalDevice) -> vk.SampleCountFlags {
+    props : vk.PhysicalDeviceProperties 
+    vk.GetPhysicalDeviceProperties(physicalDevice, &props) 
+
+    counts := props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts
+
+    if (counts & vk.SampleCountFlags{vk.SampleCountFlag._64} != vk.SampleCountFlags{}) do return {._64}
+    if (counts & vk.SampleCountFlags{vk.SampleCountFlag._32} != vk.SampleCountFlags{}) do return {._32}    
+    if (counts & vk.SampleCountFlags{vk.SampleCountFlag._16} != vk.SampleCountFlags{}) do return {._16}
+    if (counts & vk.SampleCountFlags{vk.SampleCountFlag._8} != vk.SampleCountFlags{}) do return {._8}
+    if (counts & vk.SampleCountFlags{vk.SampleCountFlag._4} != vk.SampleCountFlags{}) do return {._4}
+    if (counts & vk.SampleCountFlags{vk.SampleCountFlag._2} != vk.SampleCountFlags{}) do return {._2}
+
+    return {._1}
+
+}
+
+createColorResources :: proc(using ctx: ^Context) {
+    colorFormat := swapchain.format
+
+    createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, msaa, colorFormat,
+    .OPTIMAL, {.TRANSIENT_ATTACHMENT, .COLOR_ATTACHMENT}, {.DEVICE_LOCAL}, &colorImage.image)
+
+    colorImage.view = createImageView(ctx, colorImage.image.texture, colorFormat, {.COLOR}, 1)
+}
     
 
-    initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
+initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     start = time.now()
     getInstanceProcAddr := sdl.Vulkan_GetVkGetInstanceProcAddr()
     assert(getInstanceProcAddr != nil)
@@ -1461,6 +1488,7 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, format: vk.Format, tili
     createDescriptorSetLayout(ctx)
     createGraphicsPipeline(ctx)
     createCommandPool(ctx)
+    createColorResources(ctx)
     createDepthResource(ctx)
     createFrameBuffers(ctx)
     createTextureImage(ctx)
@@ -1719,6 +1747,7 @@ recreateSwapchain :: proc(using ctx: ^Context) {
 
     createSwapchain(ctx)
     createImageViews(ctx)
+    createColorResources(ctx)
     createDepthResource(ctx)
     createFrameBuffers(ctx)
 
@@ -1875,6 +1904,10 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
 }
 
 cleanSwapchain :: proc(using ctx: ^Context) {   
+    vk.DestroyImageView(device, colorImage.view, nil)
+    vk.DestroyImage(device, colorImage.image.texture, nil)
+    vk.FreeMemory(device, colorImage.image.memory, nil)
+
     vk.DestroyImageView(device, depthImage.view, nil)
     vk.DestroyImage(device, depthImage.image.texture, nil)
     vk.FreeMemory(device, depthImage.image.memory, nil)
