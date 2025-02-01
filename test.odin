@@ -1068,10 +1068,9 @@ createTextureImage :: proc(using ctx: ^Context) {
     vk.MapMemory(device, stagingBuffer.memory, 0, imageSize, {}, &data)
     mem.copy(data, loadedImage, cast(int)imageSize)
     vk.UnmapMemory(device, stagingBuffer.memory)
-
  
     createImage(ctx, w32, h32, mipLevels, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
-    transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, 1)
+    transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, mipLevels)
     copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32)
 
     vk.DestroyBuffer(device, stagingBuffer.buffer, nil)
