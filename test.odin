@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:c"
 import "core:os"
 import "base:runtime"
 import sdl "vendor:sdl2"
@@ -8,6 +9,7 @@ import vk "vendor:vulkan"
 import "core:mem"
 import "core:time"
 import "core:strings"
+import "core:slice"
 import "core:math/linalg"
 import "core:math"
 import "core:encoding/endian"
@@ -32,6 +34,8 @@ DEVICE_EXTENSIONS := [?]cstring{
 MAX_FRAMES_IN_FLIGHT :: 2
 
 Context :: struct {
+    pipelines: map[string]vk.Pipeline, 
+
     uri: cstring,
     start : time.Time,
     window: ^sdl.Window,
@@ -44,10 +48,10 @@ Context :: struct {
     surface: vk.SurfaceKHR,
     presentQueue: vk.Queue,
     swapchain: Swapchain,
+    bbRenderPass: vk.RenderPass,
     renderPass: vk.RenderPass,
     descriptorSetLayout: vk.DescriptorSetLayout,
     pipelineLayout: vk.PipelineLayout,
-    graphicsPipeline: vk.Pipeline,
     commandPool: vk.CommandPool,
     commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
     imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
@@ -56,8 +60,6 @@ Context :: struct {
     currentFrame :u32,
     framebufferResized :bool,
 
-    vertexBuffer: Buffer,
-    indexBuffer: Buffer,
     uniformBuffers: []Buffer,
     uniformBuffersMapped: []rawptr,
 
@@ -72,7 +74,37 @@ Context :: struct {
     depthImage: DepthImage,
     colorImage: DepthImage,
     msaa: vk.SampleCountFlags,
+    camera: Camera,
+    ray: Ray,
+    meshes: [dynamic]MeshObject,
+    boundingBoxes: []BoundingBox
+}
 
+BoundingBox :: struct {
+    min: linalg.Vector3f32,
+    max: linalg.Vector3f32,
+    vertexBuffer: Buffer,
+    indexBuffer: Buffer,
+}
+
+Camera :: struct {
+    projection: linalg.Matrix4x4f32,
+    position: linalg.Vector4f32,
+    view: linalg.Matrix4x4f32,
+    model: linalg.Matrix4x4f32
+}
+
+Ray :: struct {
+    origin: linalg.Vector4f32,
+    direction: linalg.Vector4f32,
+ 
+}
+
+MeshObject :: struct {
+    vertexBuffer: Buffer, 
+    indexBuffer: Buffer,
+    transform: linalg.Matrix4x4f32,
+    boundingBox: BoundingBox,
 }
 
 DepthImage :: struct{
@@ -101,13 +133,32 @@ Swapchain :: struct {
     format: vk.Format,
     extent: vk.Extent2D,
     imageViews: []vk.ImageView,
-    framebuffers: []vk.Framebuffer
+    framebuffers: []vk.Framebuffer,
 }
 
 QueueFamily :: enum {
     Graphics,
     Present,
 }
+
+Vec4Position :: proc(vec3: [3]f32) -> linalg.Vector4f32 {
+    return linalg.Vector4f32{
+        vec3[0], vec3[1], vec3[2], 1.0
+    }
+}
+
+Vec4Direction:: proc(vec3: [3]f32) -> linalg.Vector4f32 {
+    return linalg.Vector4f32{
+        vec3[0], vec3[1], vec3[2], 0.0
+    }
+}
+
+Vec3From4 :: proc(vec4: [4]f32) -> linalg.Vector3f32 {
+    return linalg.Vector3f32{
+        vec4[0], vec4[1], vec4[2]
+    }
+}
+
 
 Vertex :: struct{
     pos: [3]f32,
@@ -297,9 +348,10 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
         if props.deviceType == .DISCRETE_GPU do score += 1000
         score += cast(int)props.limits.maxImageDimension2D
 
-        if !features.geometryShader do return 0;
-		if !checkDeviceExtensionSupport(dev) do return 0;
-        if !features.samplerAnisotropy do return 0;
+        if !features.fillModeNonSolid do return 0
+        if !features.geometryShader do return 0
+		if !checkDeviceExtensionSupport(dev) do return 0
+        if !features.samplerAnisotropy do return 0
 
         details := querySwapChainSupport(dev, ctx)
         if len(details.formats) == 0 || len(details.presentModes) == 0 do return 0
@@ -346,6 +398,7 @@ createLogicalDevice :: proc(using ctx: ^Context) {
     deviceFeatures: vk.PhysicalDeviceFeatures
     deviceFeatures.samplerAnisotropy = true
     deviceFeatures.sampleRateShading = true
+    deviceFeatures.fillModeNonSolid = true
     createInfo: vk.DeviceCreateInfo
 
     createInfo.sType = .DEVICE_CREATE_INFO
@@ -560,128 +613,272 @@ createImageViews :: proc(using ctx: ^Context) {
 
 }
 
-createGraphicsPipeline :: proc(using ctx: ^Context) {
+createPipelines :: proc(using ctx: ^Context) {
+    meshPipeline := createMeshPipeline(ctx)
+    boundingBoxPipeline := createBoundingBoxPipeline(ctx)
+   
+    pipelines = make(map[string]vk.Pipeline)
+    pipelines["mesh"] = meshPipeline
+    pipelines["bb"] = boundingBoxPipeline
+}
 
-    createShaderModule :: proc(data: []u8, device: vk.Device) -> vk.ShaderModule {
-        createInfo : vk.ShaderModuleCreateInfo
-        createInfo.sType = .SHADER_MODULE_CREATE_INFO
-        createInfo.codeSize = len(data)
-        createInfo.pCode = cast(^u32)raw_data(data)
+createBoundingBoxPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
+    // Load shader modules
+    vertShaderCode, _ := os.read_entire_file_from_filename("shaders/bb.vert.spv")
+    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/bb.frag.spv")
+    defer delete(vertShaderCode)
+    defer delete(fragShaderCode)
 
-        shaderModule : vk.ShaderModule
-        if vk.CreateShaderModule(device, &createInfo, nil, &shaderModule) != .SUCCESS {
-            fmt.println("failed to create shader module")
-            os.exit(1) 
-        }
+    vertShaderModule := createShaderModule(vertShaderCode, device)
+    fragShaderModule := createShaderModule(fragShaderCode, device)
+    defer vk.DestroyShaderModule(device, vertShaderModule, nil)
+    defer vk.DestroyShaderModule(device, fragShaderModule, nil)
 
-        return shaderModule
+    // Shader stages
+    vertShaderStage := vk.PipelineShaderStageCreateInfo{
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vertShaderModule,
+        pName = "main",
     }
 
-    vert, ok := os.read_entire_file_from_filename("shaders/vert.spv")
-    if !ok {
-        return
+    fragShaderStage := vk.PipelineShaderStageCreateInfo{
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = fragShaderModule,
+        pName = "main",
     }
-    defer delete(vert)
-    frag :[]u8
-    frag,ok = os.read_entire_file_from_filename("shaders/frag.spv")
-    if !ok {
-        return
+
+    shaderStages := []vk.PipelineShaderStageCreateInfo{vertShaderStage, fragShaderStage}
+
+    // Vertex input (only positions)
+    vertexBinding := vk.VertexInputBindingDescription{
+        binding = 0,
+        stride = size_of([3]f32), // Only position (vec3)
+        inputRate = .VERTEX,
     }
-    defer delete(frag)
 
-    vModule := createShaderModule(vert, device)
-    fModule := createShaderModule(frag, device)
+    vertexAttributes := []vk.VertexInputAttributeDescription{
+        {
+            location = 0, // Position
+            binding = 0,
+            format = .R32G32B32_SFLOAT,
+            offset = 0,
+        },
+    }
 
-    defer vk.DestroyShaderModule(device, vModule, nil)
-    defer vk.DestroyShaderModule(device, fModule, nil)
+    vertexInput := vk.PipelineVertexInputStateCreateInfo{
+        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = &vertexBinding,
+        vertexAttributeDescriptionCount = cast(u32)len(vertexAttributes),
+        pVertexAttributeDescriptions = &vertexAttributes[0],
+    }
 
-    dynamicStates := [?]vk.DynamicState{.VIEWPORT, .SCISSOR};
-    dynamicState : vk.PipelineDynamicStateCreateInfo
-    dynamicState.sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO
-    dynamicState.dynamicStateCount = len(dynamicStates)
-    dynamicState.pDynamicStates = &dynamicStates[0]
+    // Input assembly (lines)
+    inputAssembly := vk.PipelineInputAssemblyStateCreateInfo{
+        sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        topology = .LINE_LIST, // Draw lines
+        primitiveRestartEnable = false,
+    }
 
-    vertShaderStageInfo: vk.PipelineShaderStageCreateInfo
-    vertShaderStageInfo.sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
-    vertShaderStageInfo.stage = {.VERTEX}
-    vertShaderStageInfo.module = vModule 
-    vertShaderStageInfo.pName = "main"
+    // Viewport and scissor
+    viewport := vk.Viewport{
+        x = 0,
+        y = 0,
+        width = cast(f32)swapchain.extent.width,
+        height = cast(f32)swapchain.extent.height,
+        minDepth = 0,
+        maxDepth = 1,
+    }
 
-    fragShaderStageInfo: vk.PipelineShaderStageCreateInfo
-    fragShaderStageInfo.sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
-    fragShaderStageInfo.stage = {.FRAGMENT}
-    fragShaderStageInfo.module = fModule 
-    fragShaderStageInfo.pName = "main"
+    scissor := vk.Rect2D{
+        offset = {0, 0},
+        extent = swapchain.extent,
+    }
 
-    shaderStages :  = []vk.PipelineShaderStageCreateInfo{vertShaderStageInfo, fragShaderStageInfo}
+    viewportState := vk.PipelineViewportStateCreateInfo{
+        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        viewportCount = 1,
+        pViewports = &viewport,
+        scissorCount = 1,
+        pScissors = &scissor,
+    }
 
-    vertexInputInfo : vk.PipelineVertexInputStateCreateInfo
-    vertexInputInfo.sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
-    vertexInputInfo.vertexBindingDescriptionCount = 1
-    vertexInputInfo.pVertexBindingDescriptions = &VERTEX_BINDING
-    vertexInputInfo.vertexAttributeDescriptionCount = len(VERTEX_ATTRIBUTES)
-    vertexInputInfo.pVertexAttributeDescriptions = &VERTEX_ATTRIBUTES[0]
+    // Rasterizer (wireframe)
+    rasterizer := vk.PipelineRasterizationStateCreateInfo{
+        sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        depthClampEnable = false,
+        rasterizerDiscardEnable = false,
+        polygonMode = .LINE, // Render as lines
+        lineWidth = 5.0, // Line thickness
+        cullMode = {}, // Optional: Adjust culling as needed
+        frontFace = .COUNTER_CLOCKWISE,
+        depthBiasEnable = false,
+    }
 
-    inputAssembly: vk.PipelineInputAssemblyStateCreateInfo
-    inputAssembly.sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
-    inputAssembly.topology = .TRIANGLE_LIST
-    inputAssembly.primitiveRestartEnable = false
+    // Multisampling (disabled)
+    multisampling := vk.PipelineMultisampleStateCreateInfo{
+        sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        sampleShadingEnable = false,
+        rasterizationSamples = {._1}, // No multisampling
+    }
 
+    // Depth and stencil testing (disabled)
+    depthStencil := vk.PipelineDepthStencilStateCreateInfo{
+        sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        depthTestEnable = false, // Disable depth testing
+        depthWriteEnable = false, // Disable depth writing
+        depthCompareOp = .LESS,
+        depthBoundsTestEnable = false,
+        stencilTestEnable = false,
+    }
 
-    scissor: vk.Rect2D
-    scissor.offset = {0, 0}
-    scissor.extent = {0, 0}
+    // Color blending (no blending)
+    colorBlendAttachment := vk.PipelineColorBlendAttachmentState{
+        colorWriteMask = {.R, .G, .B, .A}, // Write all color channels
+        blendEnable = false, // No blending
+    }
 
-    viewportState: vk.PipelineViewportStateCreateInfo
-    viewportState.sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO
-    viewportState.viewportCount = 1.0
-    viewportState.scissorCount = 1.0
+    colorBlending := vk.PipelineColorBlendStateCreateInfo{
+        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        logicOpEnable = false,
+        logicOp = .COPY,
+        attachmentCount = 1,
+        pAttachments = &colorBlendAttachment,
+        blendConstants = {0, 0, 0, 0},
+    }
 
+    // Create the pipeline
+    pipelineInfo := vk.GraphicsPipelineCreateInfo{
+        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
+        stageCount = cast(u32)len(shaderStages),
+        pStages = &shaderStages[0],
+        pVertexInputState = &vertexInput,
+        pInputAssemblyState = &inputAssembly,
+        pViewportState = &viewportState,
+        pRasterizationState = &rasterizer,
+        pMultisampleState = &multisampling,
+        pDepthStencilState = &depthStencil,
+        pColorBlendState = &colorBlending,
+        layout = pipelineLayout,
+        renderPass = bbRenderPass,
+        subpass = 0,
+    }
 
-    rasterizer: vk.PipelineRasterizationStateCreateInfo
-    rasterizer.sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO
-    rasterizer.depthClampEnable = false 
-    rasterizer.rasterizerDiscardEnable = false
-    rasterizer.polygonMode = .FILL 
-    rasterizer.lineWidth = 1.0
-    rasterizer.cullMode = {.BACK}
-    rasterizer.frontFace = .COUNTER_CLOCKWISE 
-    rasterizer.depthBiasEnable = false 
+    pipeline: vk.Pipeline
+    if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline) != .SUCCESS {
+        fmt.eprintln("failed to create bounding box pipeline")
+        os.exit(1)
+    }
 
-    multisampling: vk.PipelineMultisampleStateCreateInfo
-    multisampling.sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
-    multisampling.sampleShadingEnable = true
-    multisampling.minSampleShading = 0.2
-    multisampling.rasterizationSamples = msaa
+    return pipeline
+}
 
-    colorBlendAttachments: vk.PipelineColorBlendAttachmentState
-    colorBlendAttachments.colorWriteMask = {.R, .G, .B, .A}
-    colorBlendAttachments.blendEnable = false 
+createShaderModule :: proc(data: []u8, device: vk.Device) -> vk.ShaderModule {
+    createInfo : vk.ShaderModuleCreateInfo
+    createInfo.sType = .SHADER_MODULE_CREATE_INFO
+    createInfo.codeSize = len(data)
+    createInfo.pCode = cast(^u32)raw_data(data)
 
-
-    colorBlending: vk.PipelineColorBlendStateCreateInfo 
-    colorBlending.sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
-    colorBlending.logicOpEnable = false 
-    colorBlending.logicOp = .COPY 
-    colorBlending.attachmentCount = 1
-    colorBlending.pAttachments = &colorBlendAttachments
-    colorBlending.blendConstants[0] = 0.0
-    colorBlending.blendConstants[1] = 0.0
-    colorBlending.blendConstants[2] = 0.0
-    colorBlending.blendConstants[3] = 0.0
-
-    pipelineLayoutInfo: vk.PipelineLayoutCreateInfo 
-    pipelineLayoutInfo.sType = .PIPELINE_LAYOUT_CREATE_INFO
-    pipelineLayoutInfo.setLayoutCount = 1 
-    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout
-    pipelineLayoutInfo.pushConstantRangeCount = 0 
-    pipelineLayoutInfo.pPushConstantRanges = nil 
-
-    if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &pipelineLayout) != .SUCCESS {
-        fmt.println("failed to pipeline layout")
+    shaderModule : vk.ShaderModule
+    if vk.CreateShaderModule(device, &createInfo, nil, &shaderModule) != .SUCCESS {
+        fmt.println("failed to create shader module")
         os.exit(1) 
     }
 
+    return shaderModule
+}
+
+
+createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
+    // Load shader modules
+    vertShaderCode, _ := os.read_entire_file_from_filename("shaders/vert.spv")
+    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/frag.spv")
+    defer delete(vertShaderCode)
+    defer delete(fragShaderCode)
+
+    vertShaderModule := createShaderModule(vertShaderCode, device)
+    fragShaderModule := createShaderModule(fragShaderCode, device)
+    defer vk.DestroyShaderModule(device, vertShaderModule, nil)
+    defer vk.DestroyShaderModule(device, fragShaderModule, nil)
+
+    // Shader stages
+    vertShaderStage := vk.PipelineShaderStageCreateInfo{
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vertShaderModule,
+        pName = "main",
+    }
+
+    fragShaderStage := vk.PipelineShaderStageCreateInfo{
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = fragShaderModule,
+        pName = "main",
+    }
+
+    shaderStages := []vk.PipelineShaderStageCreateInfo{vertShaderStage, fragShaderStage}
+
+
+    vertexInput := vk.PipelineVertexInputStateCreateInfo{
+        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = &VERTEX_BINDING,
+        vertexAttributeDescriptionCount = cast(u32)len(VERTEX_ATTRIBUTES),
+        pVertexAttributeDescriptions = &VERTEX_ATTRIBUTES[0],
+    }
+
+    // Input assembly
+    inputAssembly := vk.PipelineInputAssemblyStateCreateInfo{
+        sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        topology = .TRIANGLE_LIST,
+        primitiveRestartEnable = false,
+    }
+
+    // Viewport and scissor
+    viewport := vk.Viewport{
+        x = 0,
+        y = 0,
+        width = cast(f32)swapchain.extent.width,
+        height = cast(f32)swapchain.extent.height,
+        minDepth = 0,
+        maxDepth = 1,
+    }
+
+    scissor := vk.Rect2D{
+        offset = {0, 0},
+        extent = swapchain.extent,
+    }
+
+    viewportState := vk.PipelineViewportStateCreateInfo{
+        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        viewportCount = 1,
+        pViewports = &viewport,
+        scissorCount = 1,
+        pScissors = &scissor,
+    }
+
+    // Rasterizer
+    rasterizer := vk.PipelineRasterizationStateCreateInfo{
+        sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        depthClampEnable = false,
+        rasterizerDiscardEnable = false,
+        polygonMode = .FILL,
+        lineWidth = 1.0,
+        cullMode = {.BACK},
+        frontFace = .COUNTER_CLOCKWISE,
+        depthBiasEnable = false,
+    }
+
+    // Multisampling
+    multisampling := vk.PipelineMultisampleStateCreateInfo{
+        sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        sampleShadingEnable = false,
+        rasterizationSamples = {._8}, // TODO why was it 1 from the beginning?
+    }
+
+    // Depth and stencil testing
     depthStencil := vk.PipelineDepthStencilStateCreateInfo{
         sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         depthTestEnable = true,
@@ -689,30 +886,93 @@ createGraphicsPipeline :: proc(using ctx: ^Context) {
         depthCompareOp = .LESS,
         depthBoundsTestEnable = false,
         stencilTestEnable = false,
-        
     }
 
-    pipelineInfo : vk.GraphicsPipelineCreateInfo
-    pipelineInfo.sType = .GRAPHICS_PIPELINE_CREATE_INFO
-    pipelineInfo.stageCount = 2
-    pipelineInfo.pStages = &shaderStages[0]
-    pipelineInfo.pVertexInputState = &vertexInputInfo
-    pipelineInfo.pInputAssemblyState = &inputAssembly
-    pipelineInfo.pViewportState = &viewportState
-    pipelineInfo.pRasterizationState = &rasterizer 
-    pipelineInfo.pMultisampleState = &multisampling
-    pipelineInfo.pColorBlendState = &colorBlending
-    pipelineInfo.pDynamicState = &dynamicState
-    pipelineInfo.layout = pipelineLayout
-    pipelineInfo.renderPass = renderPass 
-    pipelineInfo.subpass = 0
-    pipelineInfo.basePipelineHandle = vk.Pipeline{}
-    pipelineInfo.pDepthStencilState = &depthStencil
-
-    if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &graphicsPipeline) != .SUCCESS {
-        fmt.println("failed to pipeline")
-        os.exit(1) 
+    // Color blending
+    colorBlendAttachment := vk.PipelineColorBlendAttachmentState{
+        colorWriteMask = {.R, .G, .B, .A},
+        blendEnable = false,
     }
+
+    colorBlending := vk.PipelineColorBlendStateCreateInfo{
+        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        logicOpEnable = false,
+        logicOp = .COPY,
+        attachmentCount = 1,
+        pAttachments = &colorBlendAttachment,
+        blendConstants = {0, 0, 0, 0},
+    }
+
+    // Create the pipeline
+    pipelineInfo := vk.GraphicsPipelineCreateInfo{
+        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
+        stageCount = cast(u32)len(shaderStages),
+        pStages = &shaderStages[0],
+        pVertexInputState = &vertexInput,
+        pInputAssemblyState = &inputAssembly,
+        pViewportState = &viewportState,
+        pRasterizationState = &rasterizer,
+        pMultisampleState = &multisampling,
+        pDepthStencilState = &depthStencil,
+        pColorBlendState = &colorBlending,
+        layout = pipelineLayout,
+        renderPass = renderPass,
+        subpass = 0,
+    }
+
+    pipeline: vk.Pipeline
+    if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline) != .SUCCESS {
+        fmt.eprintln("failed to create mesh pipeline")
+        os.exit(1)
+    }
+
+    return pipeline
+}
+
+createBoundingBoxRenderPass :: proc(using ctx: ^Context) {
+    colorAttachment := vk.AttachmentDescription{
+        format = swapchain.format,
+        samples = {._1},
+        loadOp = .CLEAR,
+        storeOp = .STORE,
+        stencilLoadOp = .DONT_CARE,
+        stencilStoreOp = .DONT_CARE,
+        initialLayout = .UNDEFINED,
+        finalLayout = .PRESENT_SRC_KHR
+    }
+
+    colorAttachmentRef := vk.AttachmentReference{
+        attachment = 0,
+        layout = .COLOR_ATTACHMENT_OPTIMAL,
+    }
+
+    subpass := vk.SubpassDescription{
+        pipelineBindPoint = .GRAPHICS,
+        colorAttachmentCount = 1,
+        pColorAttachments = &colorAttachmentRef
+    }
+
+    dependency := vk.SubpassDependency{
+        srcSubpass = vk.SUBPASS_EXTERNAL,
+        dstSubpass = 0,
+        srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+        srcAccessMask = {},
+        dstStageMask = {.COLOR_ATTACHMENT_OUTPUT},
+        dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
+    }
+
+    renderPassInfo := vk.RenderPassCreateInfo{
+        sType = .RENDER_PASS_CREATE_INFO,
+        attachmentCount = 1,
+        pAttachments = &colorAttachment,
+        subpassCount = 1,
+        pSubpasses = &subpass,
+        dependencyCount = 1,
+        pDependencies = &dependency
+    }
+
+    checkVk(vk.CreateRenderPass(device, &renderPassInfo, nil, &bbRenderPass))
+
 }
 
 createRenderPass :: proc(using ctx: ^Context) {
@@ -810,6 +1070,7 @@ createFrameBuffers :: proc(using ctx: ^Context) {
         framebufferInfo.height = swapchain.extent.height
         framebufferInfo.layers = 1
 
+
         if vk.CreateFramebuffer(device, &framebufferInfo, nil, &swapchain.framebuffers[i]) != .SUCCESS{
             fmt.eprintf("Failed to create fram buffer for index %d \n", i)
             os.exit(1)
@@ -847,10 +1108,7 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     beginInfo.sType = .COMMAND_BUFFER_BEGIN_INFO
     beginInfo.pInheritanceInfo = nil
 
-    if vk.BeginCommandBuffer(buffer, &beginInfo) != .SUCCESS {
-        fmt.eprintln("failed to begin to record command buffer")
-        os.exit(1)
-    }
+    checkVk(vk.BeginCommandBuffer(buffer, &beginInfo))
 
     renderPassInfo: vk.RenderPassBeginInfo 
     renderPassInfo.sType = .RENDER_PASS_BEGIN_INFO
@@ -860,25 +1118,15 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     renderPassInfo.renderArea.extent = swapchain.extent
 
     clearValues := []vk.ClearValue{
-         {
-            color = {
-                float32 = [4]f32{0.0, 0.0, 0.0, 1.0}
-            }
-         }, 
-         {
-            depthStencil = {1.0, 0}
-         }
+        {color = {float32 = [4]f32{0.0, 0.0, 0.0, 1.0}}}, 
+        {depthStencil = {1.0, 0}}
     }
    
     renderPassInfo.clearValueCount = cast(u32)len(clearValues)
     renderPassInfo.pClearValues = &clearValues[0]
     
     vk.CmdBeginRenderPass(buffer, &renderPassInfo, .INLINE)
-    vk.CmdBindPipeline(buffer, .GRAPHICS, graphicsPipeline)
 
-    vertexBuffers := [?]vk.Buffer{vertexBuffer.buffer}
-    offsets := [?]vk.DeviceSize{0}
- 
     viewport : vk.Viewport
     viewport.x = 0.0
     viewport.y = 0.0
@@ -893,16 +1141,29 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     scissor.extent = swapchain.extent
     vk.CmdSetScissor(buffer, 0, 1, &scissor)
 
-    vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-    vk.CmdBindIndexBuffer(buffer, indexBuffer.buffer, 0, .UINT16)
-    vk.CmdBindDescriptorSets(buffer, .GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nil)
-    vk.CmdDrawIndexed(buffer, cast(u32)indexBuffer.length, 1, 0, 0, 0)
+    vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["mesh"])
+    for mesh in meshes {
+        vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
+        offsets := [?]vk.DeviceSize{0}
+        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
+        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT16)
+        vk.CmdBindDescriptorSets(buffer, .GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nil)
+        vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
+    }
+
+    vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["bb"])
+    for mesh in meshes {
+       vertexBuffers := [?]vk.Buffer{mesh.boundingBox.vertexBuffer.buffer}
+       offsets := [?]vk.DeviceSize{0}
+       vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
+       vk.CmdBindIndexBuffer(buffer, mesh.boundingBox.indexBuffer.buffer, 0, .UINT16)
+       vk.CmdBindDescriptorSets(buffer, .GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nil)
+       vk.CmdDrawIndexed(buffer, cast(u32)mesh.boundingBox.indexBuffer.length, 1, 0, 0, 0)
+    }
+
     vk.CmdEndRenderPass(buffer)
 
-    if vk.EndCommandBuffer(buffer) != .SUCCESS {
-        fmt.eprintln("failed to record command buffer")
-        os.exit(1)
-    }
+    checkVk(vk.EndCommandBuffer(buffer))
 
 }
 
@@ -1068,6 +1329,7 @@ createTextureImage :: proc(using ctx: ^Context) {
     vk.MapMemory(device, stagingBuffer.memory, 0, imageSize, {}, &data)
     mem.copy(data, loadedImage, cast(int)imageSize)
     vk.UnmapMemory(device, stagingBuffer.memory)
+
  
     createImage(ctx, w32, h32, mipLevels, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
     transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, mipLevels)
@@ -1312,8 +1574,6 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCo
         createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, msaa, depthFormat, 
         .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
         depthImage.view = createImageView(ctx, depthImage.image.texture, depthFormat, {.DEPTH}, 1)
-
-
     }
 
     Primitive :: struct {
@@ -1458,7 +1718,104 @@ createColorResources :: proc(using ctx: ^Context) {
 
     colorImage.view = createImageView(ctx, colorImage.image.texture, colorFormat, {.COLOR}, 1)
 }
+
+compute_aabb :: proc(vertices: []Vertex) -> (linalg.Vector4f32, linalg.Vector4f32) {
+    minCorner := linalg.Vector4f32{
+        max(f32),  max(f32),  max(f32), 1.0
+    }
+    maxCorner := linalg.Vector4f32{
+        -max(f32),  -max(f32),  -max(f32), 1.0
+    }
+
+    for v in vertices {
+        minCorner = linalg.min(minCorner, Vec4Position(v.pos))
+        maxCorner = linalg.max(maxCorner, Vec4Position(v.pos))
+    }
     
+
+    return minCorner, maxCorner
+}
+    
+getBoundingBoxVertices :: proc(aabbMin: linalg.Vector4f32, aabbMax: linalg.Vector4f32) -> []Vertex {
+    vertices := [8]linalg.Vector3f32{
+        linalg.Vector3f32{aabbMin.x, aabbMin.y, aabbMin.z},
+        linalg.Vector3f32{aabbMax.x, aabbMin.y, aabbMin.z},
+        linalg.Vector3f32{aabbMax.x, aabbMax.y, aabbMin.z},
+        linalg.Vector3f32{aabbMin.x, aabbMax.y, aabbMin.z},
+        linalg.Vector3f32{aabbMin.x, aabbMin.y, aabbMax.z},
+        linalg.Vector3f32{aabbMax.x, aabbMin.y, aabbMax.z},
+        linalg.Vector3f32{aabbMax.x, aabbMax.y, aabbMax.z},
+        linalg.Vector3f32{aabbMin.x, aabbMax.y, aabbMax.z},
+    }
+    
+    v : [dynamic]Vertex
+    for vert, i in vertices { 
+        append(&v, Vertex{
+            pos = {vert.x, vert.y, vert.z},
+            texCoord = {0.0, 0.0},
+            color = {1.0, 1.0, 1.0}
+        })
+    }
+
+    return v[:]
+}
+
+createDefaultPipelineLayout :: proc(using ctx: ^Context) {
+    pipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
+        sType = .PIPELINE_LAYOUT_CREATE_INFO,
+        setLayoutCount = 1,
+        pSetLayouts = &descriptorSetLayout,
+        pushConstantRangeCount = 0,
+    }
+
+    if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &pipelineLayout) != .SUCCESS {
+        fmt.eprintln("failed to create pipeline layout")
+        os.exit(1)
+    }
+
+}
+
+setupGlb :: proc(using ctx: ^Context) {
+    v, i := loadGlbModel(ctx)
+    vBuffer: Buffer
+    iBuffer: Buffer
+    min, max := compute_aabb(v)
+
+    vBuffer = createVertexBuffer(ctx, v)
+    iBuffer = createIndexBuffer(ctx, i)
+
+    boundingVBuffer: Buffer
+    boundingIBuffer: Buffer
+
+    vertices := getBoundingBoxVertices(min, max)
+    vertexBufferSize := cast(vk.DeviceSize)(len(vertices) * size_of(vertices[0]))
+
+    createBuffer(ctx, vertexBufferSize, {.VERTEX_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, &boundingVBuffer, raw_data(vertices))
+
+    boundingBoxIndices := []u16{
+        0, 1, 1, 2, 2, 3, 3, 0, // Bottom face
+        4, 5, 5, 6, 6, 7, 7, 4, // Top face
+        0, 4, 1, 5, 2, 6, 3, 7  // Connecting edges
+    }
+    indexBufferSize := cast(vk.DeviceSize)(len(boundingBoxIndices) * size_of(boundingBoxIndices[0]))
+    createBuffer(ctx, indexBufferSize,{.INDEX_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, &boundingIBuffer, raw_data(boundingBoxIndices))
+
+
+    bb := BoundingBox{
+        min = min.xyz,
+        max = max.xyz,
+        vertexBuffer = boundingVBuffer,
+        indexBuffer = boundingIBuffer,
+    }
+
+    append(&meshes, MeshObject{
+        vertexBuffer = vBuffer,
+        indexBuffer = iBuffer,
+        transform = linalg.MATRIX4F32_IDENTITY,
+        boundingBox = bb,
+    })
+
+}
 
 initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     start = time.now()
@@ -1475,26 +1832,27 @@ initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     for _, i in extensions do fmt.println(cstring(&extensions[i].extensionName[0]))
 
     createSurface(ctx)
-
-    v, i := loadGlbModel(ctx)
-
     pickPhysicalDevice(ctx)
     createLogicalDevice(ctx)
     createSwapchain(ctx)
     createImageViews(ctx)
     findQueueFamilies(ctx)
     createRenderPass(ctx)
+    createBoundingBoxRenderPass(ctx)
     createDescriptorSetLayout(ctx)
-    createGraphicsPipeline(ctx)
+
     createCommandPool(ctx)
+
+    createDefaultPipelineLayout(ctx)
+    createPipelines(ctx)
+    setupGlb(ctx)
+
     createColorResources(ctx)
     createDepthResource(ctx)
     createFrameBuffers(ctx)
     createTextureImage(ctx)
     createTextureImageView(ctx)
     createTextureSampler(ctx)
-    createVertexBuffer(ctx, v)
-    createIndexBuffer(ctx, i)
     createUniformBuffers(ctx)
     createCommandBuffers(ctx)
     createDescriptorPool(ctx)
@@ -1518,16 +1876,27 @@ exit :: proc(using ctx: ^Context) {
 
     vk.DestroyDescriptorPool(device, descriptorPool, nil)
     vk.DestroyDescriptorSetLayout(device, descriptorSetLayout, nil)
-    
-    vk.DestroyBuffer(device, indexBuffer.buffer, nil)
-    vk.FreeMemory(device, indexBuffer.memory, nil)
 
-    vk.DestroyBuffer(device, vertexBuffer.buffer, nil)
-    vk.FreeMemory(device, vertexBuffer.memory, nil)
+    for mesh in meshes {
+        vk.DestroyBuffer(device, mesh.vertexBuffer.buffer, nil)
+        vk.FreeMemory(device,  mesh.vertexBuffer.memory, nil)
+        vk.DestroyBuffer(device, mesh.indexBuffer.buffer, nil)
+        vk.FreeMemory(device,  mesh.indexBuffer.memory, nil)
 
-    vk.DestroyPipeline(device, graphicsPipeline, nil)
+        vk.DestroyBuffer(device, mesh.boundingBox.vertexBuffer.buffer, nil)
+        vk.FreeMemory(device,  mesh.boundingBox.vertexBuffer.memory, nil)
+        vk.DestroyBuffer(device, mesh.boundingBox.indexBuffer.buffer, nil)
+        vk.FreeMemory(device,  mesh.boundingBox.indexBuffer.memory, nil)
+    }
+
+    for _, pipeline in pipelines {
+        vk.DestroyPipeline(device, pipeline, nil)
+    }
+    delete(pipelines)
+
     vk.DestroyPipelineLayout(device, pipelineLayout, nil)
     vk.DestroyRenderPass(device, renderPass, nil)
+    vk.DestroyRenderPass(device, bbRenderPass, nil)
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         vk.DestroySemaphore(device, imageAvailableSemaphores[i], nil);
@@ -1641,35 +2010,48 @@ createUniformBuffers :: proc(using ctx: ^Context) {
     }
 }
 
-createBuffer :: proc(using ctx: ^Context, bufferSize: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: ^Buffer) {
+createBuffer :: proc(
+    using ctx: ^Context, 
+    bufferSize: vk.DeviceSize, 
+    usage: vk.BufferUsageFlags, 
+    properties: vk.MemoryPropertyFlags, 
+    buffer: ^Buffer,
+    data: rawptr = nil
+) {
     
-        bufferInfo: vk.BufferCreateInfo
-        bufferInfo.sType = .BUFFER_CREATE_INFO
-        bufferInfo.size = bufferSize
-        bufferInfo.usage = usage
-        bufferInfo.sharingMode = .EXCLUSIVE 
+    bufferInfo := vk.BufferCreateInfo{
+        sType = .BUFFER_CREATE_INFO,
+        size = bufferSize,
+        usage = usage,
+        sharingMode = .EXCLUSIVE,
+    }
+    checkVk(vk.CreateBuffer(device, &bufferInfo, nil, &buffer.buffer))
 
-        if vk.CreateBuffer(device, &bufferInfo, nil, &buffer.buffer) != .SUCCESS {
-            fmt.eprintln("failed to create vertex buffer")
-            os.exit(1)
-        }
+    memRequirements: vk.MemoryRequirements
+    vk.GetBufferMemoryRequirements(device, buffer.buffer, &memRequirements)
 
-    
-        memRequirements: vk.MemoryRequirements
-        vk.GetBufferMemoryRequirements(device, buffer.buffer, &memRequirements)
+    allocInfo := vk.MemoryAllocateInfo{
+        sType = .MEMORY_ALLOCATE_INFO,
+        allocationSize = memRequirements.size,
+        memoryTypeIndex = findMemType(physicalDevice, memRequirements.memoryTypeBits, properties)
+    }
 
-        allocInfo := vk.MemoryAllocateInfo{
-            sType = .MEMORY_ALLOCATE_INFO,
-            allocationSize = memRequirements.size,
-            memoryTypeIndex = findMemType(physicalDevice, memRequirements.memoryTypeBits, properties)
-        }
+    checkVk(vk.AllocateMemory(device, &allocInfo, nil, &buffer.memory))
+    checkVk(vk.BindBufferMemory(device, buffer.buffer, buffer.memory, 0))
 
-        if vk.AllocateMemory(device, &allocInfo, nil, &buffer.memory) != .SUCCESS {
-            fmt.eprintln("failed to allocate memory")
-            os.exit(1)
-        }
-    
-        vk.BindBufferMemory(device, buffer.buffer, buffer.memory, 0)
+    if data != nil {
+        ptr: rawptr
+        checkVk(vk.MapMemory(device, buffer.memory, 0, bufferSize, {}, &ptr))
+        mem.copy(ptr, data, int(bufferSize))
+        vk.UnmapMemory(device, buffer.memory)
+    }
+}
+
+checkVk :: proc(result: vk.Result, location := #caller_location) {
+    if result != .SUCCESS {
+        fmt.eprintf("Vulkan error at %s: %v\n", location, result)
+        os.exit(1)
+    }
 }
 
 findMemType :: proc(physicalDevice: vk.PhysicalDevice, typeFilter: u32, props: vk.MemoryPropertyFlags) -> u32{
@@ -1697,42 +2079,40 @@ copyBuffer :: proc(using ctx: ^Context, src, dst: Buffer, size: vk.DeviceSize) {
     vk.CmdCopyBuffer(cmdBuffer, src.buffer, dst.buffer, 1, &copyRegion)
 }
 
-createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) {
-    vertexBuffer.length = len(vertices)
-    vertexBuffer.size = cast(vk.DeviceSize)(len(vertices) * size_of(Vertex))
+createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) -> Buffer {
+    buffer: Buffer
+    buffer.length = len(vertices)
+    buffer.size = cast(vk.DeviceSize)(len(vertices) * size_of(Vertex))
     
     staging: Buffer 
-    createBuffer(ctx, vertexBuffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging)
-
-    data: rawptr 
-    vk.MapMemory(device, staging.memory, 0, vertexBuffer.size, {}, &data)
-    mem.copy(data, raw_data(vertices), cast(int)vertexBuffer.size)
-    vk.UnmapMemory(device, staging.memory)
+    createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging, raw_data(vertices))
     
-    createBuffer(ctx, vertexBuffer.size, {.VERTEX_BUFFER, .TRANSFER_DST}, {.DEVICE_LOCAL}, &vertexBuffer)
-    copyBuffer(ctx, staging, vertexBuffer, vertexBuffer.size)
+    createBuffer(ctx, buffer.size, {.VERTEX_BUFFER, .TRANSFER_DST}, {.DEVICE_LOCAL}, &buffer)
+    copyBuffer(ctx, staging, buffer, buffer.size)
 
-    vk.DestroyBuffer(device, staging.buffer, nil)
-    vk.FreeMemory(device, staging.memory, nil)
+    return buffer
 }
 
-createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) {
-    indexBuffer.length = len(indices)
-    indexBuffer.size = cast(vk.DeviceSize)(len(indices) * size_of(indices[0]))
+createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) -> Buffer{
+    buffer: Buffer
+    buffer.length = len(indices)
+    buffer.size = cast(vk.DeviceSize)(len(indices) * size_of(indices[0]))
 
     staging: Buffer 
-    createBuffer(ctx, indexBuffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging)
+    createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging)
 
     data: rawptr 
-    vk.MapMemory(device, staging.memory, 0, indexBuffer.size, {}, &data)
-    mem.copy(data, raw_data(indices), cast(int)indexBuffer.size)
+    vk.MapMemory(device, staging.memory, 0, buffer.size, {}, &data)
+    mem.copy(data, raw_data(indices), cast(int)buffer.size)
     vk.UnmapMemory(device, staging.memory)
 
-    createBuffer(ctx ,indexBuffer.size, {.TRANSFER_DST, .INDEX_BUFFER}, {.DEVICE_LOCAL}, &indexBuffer)
-    copyBuffer(ctx, staging, indexBuffer, indexBuffer.size)
+    createBuffer(ctx ,buffer.size, {.TRANSFER_DST, .INDEX_BUFFER}, {.DEVICE_LOCAL}, &buffer)
+    copyBuffer(ctx, staging, buffer, buffer.size)
 
     vk.DestroyBuffer(device, staging.buffer, nil)
     vk.FreeMemory(device, staging.memory, nil)
+
+    return buffer
 }
 
 recreateSwapchain :: proc(using ctx: ^Context) {
@@ -1804,6 +2184,8 @@ run :: proc(using ctx: ^Context) {
                         case .ESCAPE:
                             break loop
                     }
+                case .MOUSEBUTTONDOWN:
+                    handleLeftClick(ctx)
                 case .QUIT:
                     break loop
             }            
@@ -1812,6 +2194,179 @@ run :: proc(using ctx: ^Context) {
     }
 
     vk.DeviceWaitIdle(device)
+}
+
+obbRayIntersect :: proc(using ctx: ^Context, center: linalg.Vector4f32, extents: linalg.Vector4f32) -> bool {
+    invModelMatrix := linalg.matrix4_inverse(camera.model)
+
+    // Transform the ray into the OBB's local space
+    rayOriginLocal := invModelMatrix * ray.origin
+    rayDirectionLocal := invModelMatrix * ray.direction
+
+    // Perform a standard AABB-Ray intersection in local space
+    min_corner := center - extents
+    max_corner := center + extents
+
+    // The rest of your AABB intersection logic remains the same
+    tmin := (min_corner[0] - rayOriginLocal.x) / rayDirectionLocal.x
+    tmax := (max_corner[0] - rayOriginLocal.x) / rayDirectionLocal.x
+    if tmin > tmax {
+        tmin, tmax = tmax, tmin
+    }
+
+    tymin := (min_corner[1] - rayOriginLocal.y) / rayDirectionLocal.y
+    tymax := (max_corner[1] - rayOriginLocal.y) / rayDirectionLocal.y
+    if tymin > tymax {
+        tymin, tymax = tymax, tymin
+    }
+
+    if tmin > tymax || tymin > tmax {
+        return false
+    }
+
+    if tymin > tmin {
+        tmin = tymin
+    }
+    if tymax < tmax {
+        tmax = tymax
+    }
+
+    tzmin := (min_corner[2] - rayOriginLocal.z) / rayDirectionLocal.z
+    tzmax := (max_corner[2] - rayOriginLocal.z) / rayDirectionLocal.z
+    if tzmin > tzmax {
+        tzmin, tzmax = tzmax, tzmin
+    }
+
+    if tmin > tzmax || tzmin > tmax {
+        return false
+    }
+
+    return true
+}
+
+rayTriangleIntersect :: proc(using ctx: ^Context, v0: linalg.Vector3f32, v1: linalg.Vector3f32, v2: linalg.Vector3f32) -> (bool, f32) {
+    // Use the Möller–Trumbore intersection algorithm
+    e1 := v1 - v0;
+    e2 := v2 - v0;
+    h := linalg.cross(Vec3From4(ray.direction), e2);
+    a := linalg.dot(e1, h);
+
+    if a > -1e-8 && a < 1e-8 {
+        return false, 0.0; // No intersection (ray is parallel to triangle)
+    }
+
+    f := 1.0 / a;
+    s := Vec3From4(ray.origin) - v0;
+    u := f * linalg.dot(s, h);
+
+    if u < 0.0 || u > 1.0 {
+        return false, 0.0; // No intersection (outside triangle)
+    }
+
+    q := linalg.cross(s, e1);
+    v := f * linalg.dot(Vec3From4(ray.direction), q);
+
+    if v < 0.0 || u + v > 1.0 {
+        return false, 0.0; // No intersection (outside triangle)
+    }
+
+    t := f * linalg.dot(e2, q);
+    if t > 1e-8 { // Intersection point is valid
+        return true, t; // Return the intersection point distance along the ray
+    } else {
+        return false, 0.0; // No intersection (behind ray origin)
+    }
+}
+
+
+
+aabbClosestIntersection :: proc(using ctx: ^Context) -> ^MeshObject {
+    closest: ^MeshObject = nil
+    closest_t := max(f32)
+
+    for &mesh in meshes {
+        // Transform the AABB to world space
+        transformedMin := camera.model * Vec4Position(mesh.boundingBox.min) 
+        transformedMax := camera.model * Vec4Position(mesh.boundingBox.max) 
+
+        // Calculate the center and extents of the AABB
+        center := (transformedMax + transformedMin) * 0.5
+        extents := (transformedMax - transformedMin) * 0.5
+
+        // Check for ray-AABB intersection
+        intersects, t := rayAABBIntersect(ctx, center.xyz, extents.xyz)
+
+        if intersects && t < closest_t {
+            closest_t = t
+            closest = &mesh
+        }
+    }
+
+    return closest
+}
+
+rayAABBIntersect :: proc(using ctx: ^Context, center, extents: [3]f32) -> (bool, f32) {
+    // Transform the ray to the AABB's local space
+    invTransform := linalg.inverse(camera.model)
+    localOrigin := linalg.matrix_mul_vector(invTransform, ctx.ray.origin)
+    localDir := linalg.matrix_mul_vector(invTransform, ctx.ray.direction)
+
+    // Slab method for ray-AABB intersection
+    tMin := -max(f32)
+    tMax := max(f32)
+
+    for i in 0..<3 {
+        if linalg.less_than(linalg.abs(localDir[i]), 1e-6) {
+            // Ray is parallel to the slab
+            if localOrigin[i] < center[i] - extents[i] || localOrigin[i] > center[i] + extents[i] {
+                return false, 0 // No intersection
+            }
+        } else {
+            // Compute intersection distances
+            t1 := (center[i] - extents[i] - localOrigin[i]) / localDir[i]
+            t2 := (center[i] + extents[i] - localOrigin[i]) / localDir[i]
+            tMin = max(tMin, min(t1, t2))
+            tMax = min(tMax, max(t1, t2))
+        }
+    }
+
+    if tMax < tMin || tMax < 0 {
+        return false, 0 // No intersection
+    }
+    return true, tMin // Intersection at distance tMin
+}
+
+handleLeftClick :: proc(using ctx: ^Context) {
+    x,y: c.int
+    state := sdl.GetMouseState(&x, &y)
+
+    ndcX := (2.0 * f32(x)) / f32(swapchain.extent.width) - 1.0
+    ndcY := 1.0 - (2.0 * f32(y) / f32(swapchain.extent.height))
+
+
+    clip_coords : linalg.Vector4f32 ={
+        ndcX, ndcY, -1.0, 1.0
+    } 
+
+    rayView := linalg.matrix_mul_vector(linalg.inverse(camera.projection), clip_coords)
+    rayView.z = -1.0
+    rayView.w = 0.0
+
+    invView := linalg.matrix4_inverse(camera.view)
+
+    rayDirectionWorld := linalg.matrix_mul_vector(invView, rayView);
+    rayDirectionWorld = linalg.normalize(rayDirectionWorld);
+
+    rayWorld := linalg.matrix_mul_vector(invView, rayView)
+
+    rayOrigin := camera.position
+
+    ray.origin = rayOrigin
+    ray.direction = rayDirectionWorld
+
+
+    selected := aabbClosestIntersection(ctx)
+
 }
 
 drawFrame :: proc(using ctx: ^Context) {
@@ -1883,12 +2438,16 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
  
     current := time.now()
     timeElapsed := cast(f32)time.duration_seconds(time.diff(start, current))
+    movement := math.sin(timeElapsed)
+    speed := f32(1.0)
+    movement *= speed
+    translation := linalg.matrix4_translate(linalg.Vector3f32{movement, 0, 0})
     ubo: UBO
     angle := math.to_radians_f32(90) * timeElapsed
     axis := linalg.Vector3f32{0, 0, 1}
-    ubo.model = linalg.matrix4_rotate(angle, axis)
+    ubo.model = translation * linalg.matrix4_rotate(angle, axis)
     ubo.view = linalg.matrix4_look_at_f32(
-        linalg.Vector3f32{2, 2, 2}, 
+        linalg.Vector3f32{5, 5, 5}, 
         linalg.Vector3f32{0, 0, 0}, 
         linalg.Vector3f32{0, 0, 1}, true)
     ubo.proj = linalg.matrix4_perspective(
@@ -1899,6 +2458,10 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
          true
         )
     ubo.proj[1][1] *= -1
+    camera.projection = ubo.proj
+    camera.position = linalg.Vector4f32{5, 5, 5, 1}
+    camera.view = ubo.view
+    camera.model = ubo.model 
     mem.copy(uniformBuffersMapped[currentImage], &ubo, size_of(ubo));
 }
 
