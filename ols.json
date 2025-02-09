@@ -4,6 +4,7 @@
 	"enable_document_symbols": true,
 	"enable_hover": true,
 	"enable_snippets": true,
+	"enable_format": true,
 	"profile": "default",
 	"profiles": [
 		{ "name": "default", "checker_path": ["src"]},
