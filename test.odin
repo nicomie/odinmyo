@@ -711,7 +711,7 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     multisampling := vk.PipelineMultisampleStateCreateInfo{
         sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         sampleShadingEnable = false,
-        rasterizationSamples = msaa, 
+        rasterizationSamples = {._1}, 
     }
 
     // Depth and stencil testing
@@ -765,16 +765,25 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     return pipeline
 }
 
+RenderPassConfig :: struct  {
+    format: vk.Format,
+    depth_format: vk.Format,
+    resolve: bool,
+    use_depth: bool,
+    for_picking: bool,
+    final_layout: vk.ImageLayout,
+}
+
 createRenderPass :: proc(using ctx: ^Context) {
     colorAttachment := vk.AttachmentDescription{
         format = swapchain.format,
-        samples = msaa,
+        samples = {._1},
         loadOp = .CLEAR ,
         storeOp = .STORE ,
         stencilLoadOp = .DONT_CARE,
         stencilStoreOp = .DONT_CARE,
         initialLayout = .UNDEFINED ,
-        finalLayout = .COLOR_ATTACHMENT_OPTIMAL
+        finalLayout = .PRESENT_SRC_KHR
     }
 
     colorAttachmentRef := vk.AttachmentReference{
@@ -782,25 +791,9 @@ createRenderPass :: proc(using ctx: ^Context) {
         layout = .COLOR_ATTACHMENT_OPTIMAL
     }
 
-    colorAttachmentResolve := vk.AttachmentDescription{
-        format = swapchain.format,
-        samples = {._1},
-        loadOp = .DONT_CARE,
-        storeOp = .STORE,
-        stencilLoadOp = .DONT_CARE,
-        stencilStoreOp = .DONT_CARE,
-        initialLayout = .UNDEFINED,
-        finalLayout = .PRESENT_SRC_KHR
-    }
-
-    colorAttachmentResolveRef := vk.AttachmentReference{
-        attachment = 2,
-        layout = .COLOR_ATTACHMENT_OPTIMAL
-    }
-
     depthAttachment := vk.AttachmentDescription{
         format = findDepthFormat(physicalDevice),
-        samples = msaa,
+        samples = {._1},
         loadOp = .CLEAR,
         storeOp = .DONT_CARE,
         stencilLoadOp = .DONT_CARE,
@@ -818,7 +811,6 @@ createRenderPass :: proc(using ctx: ^Context) {
         pipelineBindPoint = .GRAPHICS,
         colorAttachmentCount = 1,
         pColorAttachments = &colorAttachmentRef,
-        pResolveAttachments = &colorAttachmentResolveRef,
         pDepthStencilAttachment = &depthAttachmentRef
     }
 
@@ -831,7 +823,7 @@ createRenderPass :: proc(using ctx: ^Context) {
         dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE}
     }
 
-    attachments := []vk.AttachmentDescription{colorAttachment, depthAttachment, colorAttachmentResolve}
+    attachments := []vk.AttachmentDescription{colorAttachment, depthAttachment}
     subpasses := []vk.SubpassDescription{subpass}
     dependencies := []vk.SubpassDependency{dependency }
 
@@ -855,7 +847,7 @@ createFrameBuffers :: proc(using ctx: ^Context) {
     swapchain.framebuffers = make([]vk.Framebuffer, len(swapchain.imageViews))
 
     for i in 0..<len(swapchain.imageViews) {
-        attachments := []vk.ImageView{colorImage.view, depthImage.view, swapchain.imageViews[i]}
+        attachments := []vk.ImageView{swapchain.imageViews[i], depthImage.view }
  
         framebufferInfo: vk.FramebufferCreateInfo
         framebufferInfo.sType = .FRAMEBUFFER_CREATE_INFO
@@ -947,8 +939,6 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
        vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
     }
 
-
-   
     vk.CmdEndRenderPass(buffer)
 
     checkVk(vk.EndCommandBuffer(buffer))
@@ -1088,7 +1078,6 @@ createTextureImage :: proc(using ctx: ^Context) {
     vk.MapMemory(device, stagingBuffer.memory, 0, imageSize, {}, &data)
     mem.copy(data, loadedImage, cast(int)imageSize)
     vk.UnmapMemory(device, stagingBuffer.memory)
-
  
     createImage(ctx, w32, h32, mipLevels, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
     transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, mipLevels)
@@ -1330,7 +1319,7 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCo
 
     createDepthResource ::proc(using ctx: ^Context) {
         depthFormat := findDepthFormat(physicalDevice)
-        createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, msaa, depthFormat, 
+        createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, {._1}, depthFormat, 
         .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
         depthImage.view = createImageView(ctx, depthImage.image.texture, depthFormat, {.DEPTH}, 1)
     }
@@ -1472,7 +1461,7 @@ getUsableSampleCount :: proc(physicalDevice: vk.PhysicalDevice) -> vk.SampleCoun
 createColorResources :: proc(using ctx: ^Context) {
     colorFormat := swapchain.format
 
-    createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, msaa, colorFormat,
+    createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, {._1}, colorFormat,
     .OPTIMAL, {.TRANSIENT_ATTACHMENT, .COLOR_ATTACHMENT}, {.DEVICE_LOCAL}, &colorImage.image)
 
     colorImage.view = createImageView(ctx, colorImage.image.texture, colorFormat, {.COLOR}, 1)
@@ -1821,6 +1810,9 @@ createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) -> Buffer {
     
     createBuffer(ctx, buffer.size, {.VERTEX_BUFFER, .TRANSFER_DST}, {.DEVICE_LOCAL}, &buffer)
     copyBuffer(ctx, staging, buffer, buffer.size)
+
+    vk.DestroyBuffer(device, staging.buffer, nil)
+    vk.FreeMemory(device, staging.memory, nil)
 
     return buffer
 }
