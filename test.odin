@@ -72,12 +72,18 @@ Context :: struct {
 
     depthImage: DepthImage,
     colorImage: DepthImage,
+   
     msaa: vk.SampleCountFlags,
     camera: Camera,
     ray: Ray,
     meshes: [dynamic]MeshObject,
 
+    idImage: DepthImage,
+    idRenderPass: vk.RenderPass,
+    toggleHover: bool,
+    idFramebuffer: vk.Framebuffer
 }
+
 
 Camera :: struct {
     projection: linalg.Matrix4x4f32,
@@ -765,85 +771,99 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     return pipeline
 }
 
+createIdPipeline :: proc(using ctx: ^Context) {
+    
+}
+
 RenderPassConfig :: struct  {
     format: vk.Format,
     depth_format: vk.Format,
-    resolve: bool,
     use_depth: bool,
     for_picking: bool,
     final_layout: vk.ImageLayout,
 }
 
-createRenderPass :: proc(using ctx: ^Context) {
+createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.RenderPass{
+
+    attachments := [dynamic]vk.AttachmentDescription{}
+    attachment_refs := [dynamic]vk.AttachmentReference{}
+
     colorAttachment := vk.AttachmentDescription{
-        format = swapchain.format,
+        format = config.format,
         samples = {._1},
         loadOp = .CLEAR ,
         storeOp = .STORE ,
         stencilLoadOp = .DONT_CARE,
         stencilStoreOp = .DONT_CARE,
         initialLayout = .UNDEFINED ,
-        finalLayout = .PRESENT_SRC_KHR
+        finalLayout = config.final_layout
     }
+
+    append(&attachments, colorAttachment)
 
     colorAttachmentRef := vk.AttachmentReference{
         attachment = 0,
         layout = .COLOR_ATTACHMENT_OPTIMAL
     }
 
-    depthAttachment := vk.AttachmentDescription{
-        format = findDepthFormat(physicalDevice),
-        samples = {._1},
-        loadOp = .CLEAR,
-        storeOp = .DONT_CARE,
-        stencilLoadOp = .DONT_CARE,
-        stencilStoreOp = .DONT_CARE,
-        initialLayout = .UNDEFINED,
-        finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    depth_attachment_ref := vk.AttachmentReference{}
+    depth_attachment_index := -1
+    
+    if config.use_depth {
+        depth_attachment := vk.AttachmentDescription{
+            format = findDepthFormat(physicalDevice),
+            samples = {._1},
+            loadOp = .CLEAR,
+            storeOp = .DONT_CARE,
+            stencilLoadOp = .DONT_CARE,
+            stencilStoreOp = .DONT_CARE,
+            initialLayout = .UNDEFINED,
+            finalLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        }
+        append(&attachments, depth_attachment)
+        depth_attachment_index = len(attachments) - 1
+        depth_attachment_ref = vk.AttachmentReference{
+            attachment = cast(u32)depth_attachment_index,
+            layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        }
     }
     
-    depthAttachmentRef := vk.AttachmentReference{
-        attachment = 1,
-        layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    }
-
     subpass := vk.SubpassDescription{
         pipelineBindPoint = .GRAPHICS,
         colorAttachmentCount = 1,
         pColorAttachments = &colorAttachmentRef,
-        pDepthStencilAttachment = &depthAttachmentRef
+        pDepthStencilAttachment = config.use_depth ? &depth_attachment_ref : nil,
     }
 
     dependency := vk.SubpassDependency{
         srcSubpass = vk.SUBPASS_EXTERNAL,
         dstSubpass = 0,
         srcStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-        srcAccessMask = {},
         dstStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-        dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE}
+        dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
     }
 
-    attachments := []vk.AttachmentDescription{colorAttachment, depthAttachment}
-    subpasses := []vk.SubpassDescription{subpass}
-    dependencies := []vk.SubpassDependency{dependency }
-
-    renderPassInfo := vk.RenderPassCreateInfo{
+  
+    render_pass_info := vk.RenderPassCreateInfo{
         sType = .RENDER_PASS_CREATE_INFO,
         attachmentCount = cast(u32)len(attachments),
         pAttachments = &attachments[0],
-        subpassCount = cast(u32)len(subpasses),
-        pSubpasses = &subpasses[0],
-        dependencyCount = cast(u32)len(dependencies),
-        pDependencies = &dependencies[0]
+        subpassCount = 1,
+        pSubpasses = &subpass,
+        dependencyCount = 1,
+        pDependencies = &dependency,
     }
 
-    if vk.CreateRenderPass(device, &renderPassInfo, nil, &renderPass) != .SUCCESS {
-        fmt.eprintln("failed to render pass")
-        os.exit(1);
+    render_pass: vk.RenderPass
+    if vk.CreateRenderPass(ctx.device, &render_pass_info, nil, &render_pass) != .SUCCESS {
+        fmt.eprintln("failed to create render pass")
+        os.exit(1)
     }
+
+    return render_pass
 }
 
-createFrameBuffers :: proc(using ctx: ^Context) {
+createFrameBuffer :: proc(using ctx: ^Context) {
     swapchain.framebuffers = make([]vk.Framebuffer, len(swapchain.imageViews))
 
     for i in 0..<len(swapchain.imageViews) {
@@ -863,6 +883,24 @@ createFrameBuffers :: proc(using ctx: ^Context) {
             fmt.eprintf("Failed to create fram buffer for index %d \n", i)
             os.exit(1)
         }
+    }
+}
+
+createObjectIdFramebuffer :: proc (using ctx: ^Context) {
+    attachments := []vk.ImageViews{idImage.view, depthImage.view}
+
+    framebufferInfo: vk.FramebufferCreateInfo
+    framebufferInfo.sType = .FRAMEBUFFER_CREATE_INFO
+    framebufferInfo.renderPass = idRenderPass 
+    framebufferInfo.attachmentCount = cast(u32)len(attachments)
+    framebufferInfo.pAttachments = &attachments[0]
+    framebufferInfo.width = 1
+    framebufferInfo.height = 1
+    framebufferInfo.layers = 1
+
+    if vk.CreateFramebuffer(device, &framebufferInfo, nil, &idFramebuffer) != .SUCCESS{
+        fmt.eprintf("Failed to create fram buffer for id %v \n", framebufferInfo)
+        os.exit(1)
     }
 }
 
@@ -1233,6 +1271,11 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCo
         textureImageView = createImageView(ctx, texture.texture, .R8G8B8A8_SRGB, {.COLOR}, mipLevels)
     }
 
+
+    createIdImageView :: proc(using ctx: ^Context) {    
+        idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, {._1})
+    }
+
     createImageView :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, aspectFlags: vk.ImageAspectFlags, mips: u32
     ) -> vk.ImageView {
         viewInfo := vk.ImageViewCreateInfo{
@@ -1527,7 +1570,17 @@ initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     createSwapchain(ctx)
     createImageViews(ctx)
     findQueueFamilies(ctx)
-    createRenderPass(ctx)
+    renderPass = createRenderPass(ctx, {
+        format = swapchain.format,
+        use_depth = true,
+        final_layout = .PRESENT_SRC_KHR,
+    })
+
+    idRenderPass = createRenderPass(ctx, {
+        format = .R8G8B8A8_UNORM,
+        use_depth = true,
+        final_layout = .GENERAL,
+    })
 
     createDescriptorSetLayouts(ctx)
     createPipelineLayouts(ctx)
@@ -1538,9 +1591,10 @@ initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
 
     createColorResources(ctx)
     createDepthResource(ctx)
-    createFrameBuffers(ctx)
+    createFrameBuffer(ctx)
     createTextureImage(ctx)
     createTextureImageView(ctx)
+    createIdImageView(ctx)
     createTextureSampler(ctx)
     createUniformBuffers(ctx)
     createCommandBuffers(ctx)
@@ -1582,6 +1636,7 @@ exit :: proc(using ctx: ^Context) {
     vk.DestroyPipelineLayout(device, meshPipelineLayout, nil)
 
     vk.DestroyRenderPass(device, renderPass, nil)
+    vk.DestroyRenderPass(device, idRenderPass, nil)
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         vk.DestroySemaphore(device, imageAvailableSemaphores[i], nil);
@@ -1852,7 +1907,7 @@ recreateSwapchain :: proc(using ctx: ^Context) {
     createImageViews(ctx)
     createColorResources(ctx)
     createDepthResource(ctx)
-    createFrameBuffers(ctx)
+    createFrameBuffer(ctx)
 
 }
 
