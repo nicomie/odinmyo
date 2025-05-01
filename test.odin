@@ -52,6 +52,7 @@ Context :: struct {
     meshPipelineLayout: vk.PipelineLayout,
     commandPool: vk.CommandPool,
     commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+    idCommandBuffer: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
     imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
     renderFinishedSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
     inFlightFences: [MAX_FRAMES_IN_FLIGHT]vk.Fence,
@@ -63,6 +64,7 @@ Context :: struct {
 
     descriptorPool: vk.DescriptorPool,
     descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
+    idDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
     descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 
     mipLevels: u32,
@@ -78,10 +80,16 @@ Context :: struct {
     ray: Ray,
     meshes: [dynamic]MeshObject,
 
+    idStagingBuffer: Buffer,
+    idStagingBufferMemory: vk.DeviceMemory,
+    idPipelineLayout: vk.PipelineLayout,
     idImage: DepthImage,
     idRenderPass: vk.RenderPass,
     toggleHover: bool,
-    idFramebuffer: vk.Framebuffer
+    idFramebuffer: vk.Framebuffer,
+
+    clickPending: bool,
+    clickX, clickY: i32,
 }
 
 
@@ -167,6 +175,8 @@ UBO :: struct{
     model: linalg.Matrix4f32,
     view: linalg.Matrix4f32,
     proj: linalg.Matrix4f32,
+    objectId: u32,
+    _padding: [12]u8,
 }
 
 VERTEX_BINDING := vk.VertexInputBindingDescription{
@@ -612,8 +622,10 @@ createImageViews :: proc(using ctx: ^Context) {
 
 createPipelines :: proc(using ctx: ^Context) {
     meshPipeline := createMeshPipeline(ctx)
+    idPipeline := createIdPipeline(ctx)
     pipelines = make(map[string]vk.Pipeline)
     pipelines["mesh"] = meshPipeline
+    pipelines["id"] = idPipeline
 
 }
 
@@ -771,8 +783,131 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     return pipeline
 }
 
-createIdPipeline :: proc(using ctx: ^Context) {
-    
+createIdPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
+    // Load ID shader modules
+    vertShaderCode, _ := os.read_entire_file_from_filename("shaders/id.vert.spv")
+    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/id.frag.spv")
+    defer delete(vertShaderCode)
+    defer delete(fragShaderCode)
+
+    vertShaderModule := createShaderModule(vertShaderCode, device)
+    fragShaderModule := createShaderModule(fragShaderCode, device)
+    defer vk.DestroyShaderModule(device, vertShaderModule, nil)
+    defer vk.DestroyShaderModule(device, fragShaderModule, nil)
+
+    vertShaderStage := vk.PipelineShaderStageCreateInfo{
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vertShaderModule,
+        pName = "main",
+    }
+
+    fragShaderStage := vk.PipelineShaderStageCreateInfo{
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = fragShaderModule,
+        pName = "main",
+    }
+
+    shaderStages := []vk.PipelineShaderStageCreateInfo{vertShaderStage, fragShaderStage}
+
+    vertexInput := vk.PipelineVertexInputStateCreateInfo{
+        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = &VERTEX_BINDING,
+        vertexAttributeDescriptionCount = cast(u32)len(VERTEX_ATTRIBUTES),
+        pVertexAttributeDescriptions = &VERTEX_ATTRIBUTES[0],
+    }
+
+    inputAssembly := vk.PipelineInputAssemblyStateCreateInfo{
+        sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        topology = .TRIANGLE_LIST,
+        primitiveRestartEnable = false,
+    }
+
+    viewport := vk.Viewport{
+        x = 0,
+        y = 0,
+        width = cast(f32)swapchain.extent.width,
+        height = cast(f32)swapchain.extent.height,
+        minDepth = 0,
+        maxDepth = 1,
+    }
+
+    scissor := vk.Rect2D{
+        offset = {0, 0},
+        extent = swapchain.extent,
+    }
+
+    viewportState := vk.PipelineViewportStateCreateInfo{
+        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        viewportCount = 1,
+        pViewports = &viewport,
+        scissorCount = 1,
+        pScissors = &scissor,
+    }
+
+    rasterizer := vk.PipelineRasterizationStateCreateInfo{
+        sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        depthClampEnable = false,
+        rasterizerDiscardEnable = false,
+        polygonMode = .FILL,
+        lineWidth = 1.0,
+        cullMode = nil,
+        frontFace = .COUNTER_CLOCKWISE,
+        depthBiasEnable = false,
+    }
+
+    multisampling := vk.PipelineMultisampleStateCreateInfo{
+        sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        sampleShadingEnable = false,
+        rasterizationSamples = {._1} 
+    }
+
+    depthStencil := vk.PipelineDepthStencilStateCreateInfo{
+        sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        depthTestEnable = true,
+        depthWriteEnable = true,
+        depthCompareOp = .LESS,
+        depthBoundsTestEnable = false,
+        stencilTestEnable = false,
+    }
+
+    colorBlendAttachment := vk.PipelineColorBlendAttachmentState{
+        colorWriteMask = {.R, .G, .B, .A},
+        blendEnable = false,
+    }
+
+    colorBlending := vk.PipelineColorBlendStateCreateInfo{
+        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        logicOpEnable = false,
+        attachmentCount = 1,
+        pAttachments = &colorBlendAttachment,
+    }
+
+    pipelineInfo := vk.GraphicsPipelineCreateInfo{
+        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
+        stageCount = cast(u32)len(shaderStages),
+        pStages = &shaderStages[0],
+        pVertexInputState = &vertexInput,
+        pInputAssemblyState = &inputAssembly,
+        pViewportState = &viewportState,
+        pRasterizationState = &rasterizer,
+        pMultisampleState = &multisampling,
+        pDepthStencilState = &depthStencil,
+        pColorBlendState = &colorBlending,
+        layout = idPipelineLayout, // This layout should include the UBO with ID
+        renderPass = idRenderPass, // Your special render pass for ID picking
+        subpass = 0,
+    }
+
+    pipeline: vk.Pipeline
+    if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline) != .SUCCESS {
+        fmt.eprintln("failed to create ID picking pipeline")
+        os.exit(1)
+    }
+
+    return pipeline
 }
 
 RenderPassConfig :: struct  {
@@ -887,15 +1022,15 @@ createFrameBuffer :: proc(using ctx: ^Context) {
 }
 
 createObjectIdFramebuffer :: proc (using ctx: ^Context) {
-    attachments := []vk.ImageViews{idImage.view, depthImage.view}
+    attachments := []vk.ImageView{idImage.view, depthImage.view}
 
     framebufferInfo: vk.FramebufferCreateInfo
     framebufferInfo.sType = .FRAMEBUFFER_CREATE_INFO
     framebufferInfo.renderPass = idRenderPass 
     framebufferInfo.attachmentCount = cast(u32)len(attachments)
     framebufferInfo.pAttachments = &attachments[0]
-    framebufferInfo.width = 1
-    framebufferInfo.height = 1
+    framebufferInfo.width = swapchain.extent.width
+    framebufferInfo.height = swapchain.extent.height
     framebufferInfo.layers = 1
 
     if vk.CreateFramebuffer(device, &framebufferInfo, nil, &idFramebuffer) != .SUCCESS{
@@ -927,6 +1062,83 @@ createCommandBuffers :: proc(using ctx: ^Context) {
         fmt.eprintln("failed to create command buffer")
         os.exit(1)
     }
+
+    if vk.AllocateCommandBuffers(device, &allocInfo, &idCommandBuffer[0]) != .SUCCESS {
+        fmt.eprintln("failed to create command buffer")
+        os.exit(1)
+    }
+}
+
+recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
+    beginInfo := vk.CommandBufferBeginInfo{
+        sType = .COMMAND_BUFFER_BEGIN_INFO,
+        flags = {.ONE_TIME_SUBMIT}
+    }
+    checkVk(vk.BeginCommandBuffer(buffer, &beginInfo))
+
+    barrier := vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED, // Or whatever layout it's currently in
+        newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+        image = idImage.image.texture,
+        subresourceRange = {
+            aspectMask = {.COLOR},
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 1
+        },
+        srcAccessMask = {},
+        dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
+    }
+    vk.CmdPipelineBarrier(buffer, 
+        {.TOP_OF_PIPE}, 
+        {.COLOR_ATTACHMENT_OUTPUT},
+        {}, 
+        0, nil, 0, nil, 1, &barrier)
+
+    clearValues := []vk.ClearValue{
+        {color = {float32 = [4]f32{0.0, 0.0, 0.0, 1.0}}}, 
+        {depthStencil = {1.0, 0}}
+    }
+   
+    renderPassInfo := vk.RenderPassBeginInfo{
+        sType = .RENDER_PASS_BEGIN_INFO,
+        renderPass = idRenderPass,
+        framebuffer = idFramebuffer,
+        renderArea = {
+            offset = {0,0},
+            extent = swapchain.extent
+        },
+        clearValueCount = cast(u32)len(clearValues),
+        pClearValues = &clearValues[0],
+    }
+
+    vk.CmdBeginRenderPass(buffer, &renderPassInfo, .INLINE)
+
+    vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["id"])
+    vk.CmdBindDescriptorSets(buffer, .GRAPHICS, idPipelineLayout, 0, 1, &idDescriptorSets[currentFrame], 0, nil)
+
+    for mesh,i in meshes {
+        ubo: UBO
+        ubo.model = mesh.transform
+        ubo.view = camera.view
+        ubo.proj = camera.projection
+        ubo.objectId = cast(u32)i + 2
+        
+        mem.copy(uniformBuffersMapped[currentFrame], &ubo, size_of(ubo))
+
+        vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
+        offsets := [?]vk.DeviceSize{0}
+        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
+        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT16)
+        vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
+    }
+
+    vk.CmdEndRenderPass(buffer)
+
+    vk.EndCommandBuffer(buffer)
+
 }
 
 recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
@@ -1162,6 +1374,10 @@ endCommand :: proc(using ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
     vk.FreeCommandBuffers(device, commandPool, 1, &cmdBuffer^)
 }
 
+transitionIdImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout) {
+
+}
+
 transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout, mips: u32) {
     cmdBuffer := beginCommand(ctx)
     defer endCommand(ctx, &cmdBuffer)
@@ -1273,7 +1489,7 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCo
 
 
     createIdImageView :: proc(using ctx: ^Context) {    
-        idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, {._1})
+        idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, 1)
     }
 
     createImageView :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, aspectFlags: vk.ImageAspectFlags, mips: u32
@@ -1365,6 +1581,62 @@ createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCo
         createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, {._1}, depthFormat, 
         .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
         depthImage.view = createImageView(ctx, depthImage.image.texture, depthFormat, {.DEPTH}, 1)
+    }
+
+    createIdResource :: proc(using ctx: ^Context) {
+    
+        createImage(
+            ctx,
+            swapchain.extent.width,
+            swapchain.extent.height,
+            1,
+            {._1},                         
+            .R8G8B8A8_UNORM,
+            .OPTIMAL,
+            {.COLOR_ATTACHMENT, .TRANSFER_SRC}, 
+            {.DEVICE_LOCAL},
+            &idImage.image
+        )
+    
+        idImage.view = createImageView(
+            ctx,
+            idImage.image.texture,
+            .R8G8B8A8_UNORM,
+            {.COLOR},
+            1
+        )
+
+        cmdBuffer := beginCommand(ctx)
+    
+    barrier := vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = idImage.image.texture,
+        subresourceRange = {
+            aspectMask = {.COLOR},
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 1
+        },
+        srcAccessMask = {},
+        dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
+    }
+
+    vk.CmdPipelineBarrier(
+        cmdBuffer,
+        {.TOP_OF_PIPE},
+        {.COLOR_ATTACHMENT_OUTPUT},
+        {},
+        0, nil,
+        0, nil,
+        1, &barrier
+    )
+
+    endCommand(ctx, &cmdBuffer)
     }
 
     Primitive :: struct {
@@ -1532,8 +1804,13 @@ createDescriptorSetLayouts :: proc(using ctx: ^Context) {
         {binding = 1, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}}, 
     })
 
+    idDescriptorSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
+        {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX, .FRAGMENT}}, 
+    })
+
     descriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
     descriptorSetLayouts["mesh"] = meshDescriptorSetLayout
+    descriptorSetLayouts["id"] = idDescriptorSetLayout
 }
 
 createPipelineLayouts :: proc(using ctx: ^Context) {
@@ -1548,6 +1825,18 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
         fmt.eprintln("failed to create pipeline layout")
         os.exit(1)
     }
+
+    idLayoutInfo := vk.PipelineLayoutCreateInfo{
+        sType = .PIPELINE_LAYOUT_CREATE_INFO,
+        setLayoutCount = 1,
+        pSetLayouts = &descriptorSetLayouts["id"],
+        pushConstantRangeCount = 0,
+    }
+
+    if vk.CreatePipelineLayout(device, &idLayoutInfo, nil, &idPipelineLayout) != .SUCCESS {
+        fmt.eprintln("failed to create id pipeline layout")
+        os.exit(1)
+    }
 }
 
 initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
@@ -1556,6 +1845,8 @@ initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     assert(getInstanceProcAddr != nil)
     vk.load_proc_addresses(getInstanceProcAddr)
     create_instance(ctx)
+
+
 
     vk.load_proc_addresses(instance)
     setup_debug_messenger(ctx)
@@ -1579,7 +1870,7 @@ initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
     idRenderPass = createRenderPass(ctx, {
         format = .R8G8B8A8_UNORM,
         use_depth = true,
-        final_layout = .GENERAL,
+        final_layout = .TRANSFER_SRC_OPTIMAL,
     })
 
     createDescriptorSetLayouts(ctx)
@@ -1591,22 +1882,46 @@ initVulkan :: proc(using ctx: ^Context, vertices: []Vertex, indices: []u16) {
 
     createColorResources(ctx)
     createDepthResource(ctx)
+    createIdResource(ctx)
     createFrameBuffer(ctx)
+    createObjectIdFramebuffer(ctx)
     createTextureImage(ctx)
     createTextureImageView(ctx)
     createIdImageView(ctx)
     createTextureSampler(ctx)
     createUniformBuffers(ctx)
+    
+    // Add this after creating ID resources but before command buffers
+    imageSize := cast(vk.DeviceSize)(swapchain.extent.width * swapchain.extent.height * 4)
+    createBuffer(
+        ctx,
+        imageSize, // RGBA8
+        {.TRANSFER_DST},
+        {.HOST_VISIBLE, .HOST_COHERENT},
+        &idStagingBuffer
+    )
     createCommandBuffers(ctx)
     createDescriptorPool(ctx)
     createDescriptorSets(ctx)
+    createIdDescriptorSets(ctx)
     createSyncObjects(ctx)
 
 }
 
 exit :: proc(using ctx: ^Context) {
     cleanSwapchain(ctx)
+
+    vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)
+    vk.FreeMemory(device, idStagingBuffer.memory, nil)
     
+    vk.DestroyImageView(device, idImage.view, nil)
+    vk.DestroyImage(device, idImage.image.texture, nil)
+    vk.FreeMemory(device, idImage.image.memory, nil)
+
+    // TODO IMageview error is probably depth buffer as its shared?
+
+    vk.DestroyFramebuffer(device, idFramebuffer, nil)
+
     vk.DestroySampler(device, textureSampler, nil)
     vk.DestroyImageView(device, textureImageView, nil)
     vk.DestroyImage(device, texture.texture, nil)
@@ -1619,6 +1934,7 @@ exit :: proc(using ctx: ^Context) {
 
     vk.DestroyDescriptorPool(device, descriptorPool, nil)
     vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["mesh"], nil)
+    vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["id"], nil)
     delete(descriptorSetLayouts)
     
     for mesh in meshes {
@@ -1634,6 +1950,7 @@ exit :: proc(using ctx: ^Context) {
     delete(pipelines)
 
     vk.DestroyPipelineLayout(device, meshPipelineLayout, nil)
+    vk.DestroyPipelineLayout(device, idPipelineLayout, nil)
 
     vk.DestroyRenderPass(device, renderPass, nil)
     vk.DestroyRenderPass(device, idRenderPass, nil)
@@ -1748,12 +2065,54 @@ createDescriptorSets :: proc(using ctx: ^Context) {
     }
 }
 
+createIdDescriptorSets :: proc(using ctx: ^Context) {
+    idLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        idLayouts[i] = descriptorSetLayouts["id"]
+    }
+
+    idAllocInfo := vk.DescriptorSetAllocateInfo{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = descriptorPool,
+        descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        pSetLayouts = &idLayouts[0],
+    }
+
+    if vk.AllocateDescriptorSets(device, &idAllocInfo, &idDescriptorSets[0]) != .SUCCESS {
+        fmt.eprintln("failed to allocate ID descriptor sets")
+        os.exit(1)
+    }
+
+    // Update descriptor sets for the ID pipeline
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        bufferInfo := vk.DescriptorBufferInfo{
+            buffer = uniformBuffers[i].buffer,
+            offset = 0,
+            range = size_of(UBO), // Assuming same UBO structure for viewProj
+        }
+
+        idDescriptorWrites := []vk.WriteDescriptorSet{
+            {
+                sType = .WRITE_DESCRIPTOR_SET,
+                dstSet = idDescriptorSets[i],
+                dstBinding = 0,
+                dstArrayElement = 0,
+                descriptorType = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo = &bufferInfo,
+            },
+        }
+
+        vk.UpdateDescriptorSets(device, cast(u32)len(idDescriptorWrites), &idDescriptorWrites[0], 0, nil)
+    }
+}
+
 createDescriptorPool :: proc(using ctx: ^Context) {
 
     poolSizes := []vk.DescriptorPoolSize{
         {
             type = .UNIFORM_BUFFER,
-            descriptorCount = MAX_FRAMES_IN_FLIGHT*2
+            descriptorCount = MAX_FRAMES_IN_FLIGHT*2 + MAX_FRAMES_IN_FLIGHT
         },
         {
             type = .COMBINED_IMAGE_SAMPLER,
@@ -1907,6 +2266,7 @@ recreateSwapchain :: proc(using ctx: ^Context) {
     createImageViews(ctx)
     createColorResources(ctx)
     createDepthResource(ctx)
+    createIdResource(ctx)
     createFrameBuffer(ctx)
 
 }
@@ -1953,6 +2313,51 @@ DestroyDebugUtilsMessengerEXT :: proc(
     }
 }
 
+handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
+    ctx.clickPending = true
+    ctx.clickX = x
+    ctx.clickY = y
+
+    submitInfo := vk.SubmitInfo{
+        sType = .SUBMIT_INFO,
+        commandBufferCount = 1,
+        pCommandBuffers = &idCommandBuffer[currentFrame],
+    }
+    vk.QueueSubmit(graphicsQueue, 1, &submitInfo, {})
+}
+
+processClick :: proc(using ctx: ^Context) {
+    // Only copy the clicked pixel
+    cmdBuffer := beginCommand(ctx)
+    
+    region := vk.BufferImageCopy{
+        imageSubresource = {
+            aspectMask = {.COLOR},
+            mipLevel = 0,
+            baseArrayLayer = 0,
+            layerCount = 1
+        },
+        imageOffset = {clickX, clickY, 0},
+        imageExtent = {1, 1, 1}
+    }
+
+    vk.CmdCopyImageToBuffer(cmdBuffer,
+        idImage.image.texture, .TRANSFER_SRC_OPTIMAL,
+        idStagingBuffer.buffer, 1, &region)
+
+    endCommand(ctx, &cmdBuffer)
+
+    // Read back the pixel data
+    data: rawptr
+    vk.MapMemory(device, idStagingBuffer.memory, 0, 4, {}, &data)
+    pixels := cast([^]u8)data
+    clickedId := u32(pixels[0]) << 16 | u32(pixels[1]) << 8 | u32(pixels[2])
+    vk.UnmapMemory(device, idStagingBuffer.memory)
+    
+    fmt.printf("Clicked object ID: %d at (%d, %d)\n", clickedId, clickX, clickY)
+    clickPending = false
+}
+
 run :: proc(using ctx: ^Context) {
     loop: for {
          event: sdl.Event
@@ -1962,6 +2367,10 @@ run :: proc(using ctx: ^Context) {
                     #partial switch event.key.keysym.sym {
                         case .ESCAPE:
                             break loop
+                    }
+                case .MOUSEBUTTONDOWN:
+                    if event.button.button == sdl.BUTTON_LEFT {
+                        handleMouseClick(ctx, event.button.x, event.button.y)
                     }
                 case .QUIT:
                     break loop
@@ -1996,6 +2405,10 @@ drawFrame :: proc(using ctx: ^Context) {
     waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
 
     updateUniformBuffer(ctx, currentFrame)
+
+    if clickPending {
+        processClick(ctx)
+    }
 
     submitInfo : vk.SubmitInfo 
     submitInfo.sType = .SUBMIT_INFO
