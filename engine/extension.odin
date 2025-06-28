@@ -1,15 +1,10 @@
-package app
+package engine
 
-import vk "vendor:vulkan"
 import sdl "vendor:sdl2"
+import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
 
-
-WINDOW_WIDTH  :: 854
-WINDOW_HEIGHT :: 480
-MAX_FRAMES_IN_FLIGHT :: 2
-VALIDATION_LAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation"};
 EXTENSIONS := [?]cstring{
     "VK_KHR_display", 
     "VK_KHR_surface", 
@@ -20,27 +15,7 @@ DEVICE_EXTENSIONS := [?]cstring{
     vk.KHR_SWAPCHAIN_EXTENSION_NAME
 }
 
-check_vk :: proc(result: vk.Result, location := #caller_location) {
-    if result != .SUCCESS {
-        fmt.eprintf("Vulkan error at %s: %v\n", location, result)
-        os.exit(1)
-    }
-}
-
-Status :: enum {
-    BEGIN,
-    END
-}
-
-t :: proc(status: Status, method: string) {
-   if status == .BEGIN {
-    fmt.printf("starting %v \n", method)
-   } else {
-    fmt.printf("completed %v \n", method)
-   }
-}
-
-get_sdl_extensions :: proc(window: ^sdl.Window) -> []cstring {
+get_sdlExtensions :: proc(window: ^sdl.Window) -> []cstring {
    
     extension_count: u32
     if sdl.Vulkan_GetInstanceExtensions(window, &extension_count, nil) == false {
@@ -66,3 +41,13 @@ get_sdl_extensions :: proc(window: ^sdl.Window) -> []cstring {
 
     return extensions
 }
+
+get_extensions :: proc() -> []vk.ExtensionProperties {
+    n_ext: u32;
+	vk.EnumerateInstanceExtensionProperties(nil, &n_ext, nil);
+	extensions := make([]vk.ExtensionProperties, n_ext);
+	vk.EnumerateInstanceExtensionProperties(nil, &n_ext, raw_data(extensions));
+	
+	return extensions;
+}
+

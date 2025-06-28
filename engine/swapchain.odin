@@ -1,10 +1,15 @@
-package app
+package engine 
 
+import sdl "vendor:sdl2"
+import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
-import vk "vendor:vulkan"
-import sdl "vendor:sdl2"
 
+SwapChainSupportDetails :: struct {
+    capabilities: vk.SurfaceCapabilitiesKHR,
+    formats: []vk.SurfaceFormatKHR,
+    presentModes: []vk.PresentModeKHR,
+}
 
 Swapchain :: struct {
     handle: vk.SwapchainKHR,
@@ -16,30 +21,8 @@ Swapchain :: struct {
     framebuffers: []vk.Framebuffer,
 }
 
-SwapchainSupportDetails :: struct {
-    capabilities: vk.SurfaceCapabilitiesKHR,
-    formats: []vk.SurfaceFormatKHR,
-    presentModes: []vk.PresentModeKHR,
-}
-
-recreate_swapchain :: proc(using r: ^Renderer) {
-    windowSurface := sdl.GetWindowSurface(window)
-    if (windowSurface.h == 0 || windowSurface.w == 0) {
-        sdl.GetWindowSurface(window)
-    }
-    vk.DeviceWaitIdle(device)
-
-    // clean_swapchain(ctx)
-
-    create_swapchain(r)
-    create_image_views(r)
-    create_color_resource(r)
-    create_depth_resource(r)
-    create_framebuffer(r)
-}
-
-query_swapchain_support :: proc(target: vk.PhysicalDevice, using r: ^Renderer) -> SwapchainSupportDetails{
-    details: SwapchainSupportDetails
+querySwapChainSupport :: proc(target: vk.PhysicalDevice, using ctx: ^Context) -> SwapChainSupportDetails{
+    details: SwapChainSupportDetails
     
     vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(target, surface, &details.capabilities)
 
@@ -62,7 +45,7 @@ query_swapchain_support :: proc(target: vk.PhysicalDevice, using r: ^Renderer) -
     return details
 }
 
-choose_swap_surface_format :: proc(availableFormats: ^[]vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
+chooseSwapSurfaceFormat :: proc(availableFormats: ^[]vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
     for format in availableFormats {
         if format.format == .B8G8R8A8_SRGB && format.colorSpace == .SRGB_NONLINEAR {
             return format
@@ -72,19 +55,19 @@ choose_swap_surface_format :: proc(availableFormats: ^[]vk.SurfaceFormatKHR) -> 
     return availableFormats[0]
 }
 
-choose_swap_present_mode :: proc(modes: ^[]vk.PresentModeKHR) -> vk.PresentModeKHR {
+chooseSwapPresentMode :: proc(modes: ^[]vk.PresentModeKHR) -> vk.PresentModeKHR {
     for mode in modes {
         if mode == .MAILBOX do return mode
     }
     return .FIFO
 }
 
-choose_swap_extent :: proc(r: ^Renderer, capabilities: ^vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
+chooseSwapExtent :: proc(using ctx: ^Context, capabilities: ^vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
    if capabilities.currentExtent.width != max(u32) {
         return capabilities.currentExtent
    } else {
     w,h : i32
-    sdl.GL_GetDrawableSize(r.window, &w, &h)
+    sdl.GL_GetDrawableSize(window, &w, &h)
     extent := vk.Extent2D {
         width = cast(u32) w,
         height = cast(u32) h,
@@ -105,14 +88,14 @@ clamp :: proc(value, min, max: u32) -> u32  {
         return max;
     }
     return value;
-} 
+}  
 
-create_swapchain :: proc(using r: ^Renderer) {
-    swapChainSupport := query_swapchain_support(physicalDevice, r)
+createSwapchain :: proc(using ctx: ^Context) {
+    swapChainSupport := querySwapChainSupport(physicalDevice, ctx)
 
-    surfaceFormat := choose_swap_surface_format(&swapChainSupport.formats)
-    presentMode := choose_swap_present_mode(&swapChainSupport.presentModes)
-    extent := choose_swap_extent(r, &swapChainSupport.capabilities)
+    surfaceFormat := chooseSwapSurfaceFormat(&swapChainSupport.formats)
+    presentMode := chooseSwapPresentMode(&swapChainSupport.presentModes)
+    extent := chooseSwapExtent(ctx, &swapChainSupport.capabilities)
     swapchain.imageCount = swapChainSupport.capabilities.minImageCount + 1
 
     if swapChainSupport.capabilities.maxImageCount > 0 && 
@@ -157,10 +140,38 @@ create_swapchain :: proc(using r: ^Renderer) {
 
     swapchain.format = surfaceFormat.format 
     swapchain.extent = extent
+
 }
 
-init_swapchain :: proc(r: ^Renderer) -> bool {
-    create_swapchain(r)
-    create_image_views(r)
-    return true
+recreateSwapchain :: proc(using ctx: ^Context) {
+    windowSurface := sdl.GetWindowSurface(window)
+    if (windowSurface.h == 0 || windowSurface.w == 0) {
+        sdl.GetWindowSurface(window)
+    }
+    vk.DeviceWaitIdle(device)
+
+    cleanSwapchain(ctx)
+
+    createSwapchain(ctx)
+    createImageViews(ctx)
+    createColorResources(ctx)
+    createDepthResource(ctx)
+    createFramebuffer(ctx)
+
+}
+
+cleanSwapchain :: proc(using ctx: ^Context) {   
+    vk.DestroyImageView(device, colorImage.view, nil)
+    vk.DestroyImage(device, colorImage.image.texture, nil)
+    vk.FreeMemory(device, colorImage.image.memory, nil)
+
+    vk.DestroyImageView(device, depthImage.view, nil)
+    vk.DestroyImage(device, depthImage.image.texture, nil)
+    vk.FreeMemory(device, depthImage.image.memory, nil)
+
+
+    for fb in swapchain.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
+    for view in swapchain.imageViews do vk.DestroyImageView(device, view, nil)
+    vk.DestroySwapchainKHR(device, swapchain.handle, nil)
+
 }
