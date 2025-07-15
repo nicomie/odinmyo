@@ -32,10 +32,10 @@ update :: proc(tc: ^TimeContext) {
     tc.timeElapsed = cast(f32)time.duration_seconds(time.diff(tc.start, now))
 
 
-    fmt.printf("Frame time: %.6f seconds (%.1f FPS)\n", 
-        tc.deltaTime,
-        1.0 / tc.deltaTime
-    )
+    //fmt.printf("Frame time: %.6f seconds (%.1f FPS)\n", 
+    //    tc.deltaTime,
+    //    1.0 / tc.deltaTime
+    //)
 } 
 
 end :: proc(tc: ^TimeContext) {

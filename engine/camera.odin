@@ -2,6 +2,8 @@ package engine
 
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
+import vk "vendor:vulkan"
 
 MOVE_SPEED :f32: 30
 
@@ -13,6 +15,17 @@ Camera :: struct {
     velocity: linalg.Vector3f32,
     acceleration: f32,
     max_speed: f32,
+
+    // Orbit
+    target:   linalg.Vector3f32,
+    yaw:      f32,
+    pitch:    f32,
+    distance: f32, 
+}
+
+CameraUBO :: struct {
+    view: linalg.Matrix4x4f32,
+    proj: linalg.Matrix4x4f32,
 }
 
 initCamera :: proc(using ctx: ^Context) {
@@ -39,8 +52,6 @@ initCamera :: proc(using ctx: ^Context) {
         100.0,                   
         true)
     camera.projection[1][1] *= -1
-}
 
-updateCamera :: proc(using ctx: ^Context) {
-
+    camera.distance = 5.0
 }

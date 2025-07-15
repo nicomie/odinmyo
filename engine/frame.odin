@@ -29,7 +29,7 @@ drawFrame :: proc(using ctx: ^Context) {
     updateUniformBuffer(ctx, currentFrame)
 
     if clickPending {
-        processClick(ctx)
+    //    processClick(ctx)
     }
 
     submitInfo : vk.SubmitInfo 
