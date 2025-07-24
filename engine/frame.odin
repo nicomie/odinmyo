@@ -21,12 +21,12 @@ drawFrame :: proc(using ctx: ^Context) {
     vk.ResetFences(device, 1, &inFlightFences[currentFrame])
 
     vk.ResetCommandBuffer(commandBuffers[currentFrame], {})
+    updateUniformBuffer(ctx, currentFrame)
     recordCommandBuffer(ctx, commandBuffers[currentFrame], imageIndex)
 
     waitSemaphores := [?]vk.Semaphore{imageAvailableSemaphores[currentFrame]}
     waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
 
-    updateUniformBuffer(ctx, currentFrame)
 
     if clickPending {
     //    processClick(ctx)

@@ -1,15 +1,23 @@
 package engine
 
+import "core:math/linalg"
 import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
 
 createPipelineLayouts :: proc(using ctx: ^Context) {
+    pRanges := vk.PushConstantRange{
+        stageFlags = {.VERTEX},
+        offset = 0,
+        size = size_of(linalg.Matrix4f32),
+    }
+
     pipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = 1,
         pSetLayouts = &descriptorSetLayouts["mesh"],
-        pushConstantRangeCount = 0,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = &pRanges
     }
 
     if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &meshPipelineLayout) != .SUCCESS {
@@ -17,14 +25,16 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
         os.exit(1)
     }
 
-    idLayoutInfo := vk.PipelineLayoutCreateInfo{
+    pipelineLayoutInfo = vk.PipelineLayoutCreateInfo{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = 1,
         pSetLayouts = &descriptorSetLayouts["id"],
-        pushConstantRangeCount = 0,
+        pushConstantRangeCount = 1,
+        pPushConstantRanges = &pRanges
     }
 
-    if vk.CreatePipelineLayout(device, &idLayoutInfo, nil, &idPipelineLayout) != .SUCCESS {
+
+    if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &idPipelineLayout) != .SUCCESS {
         fmt.eprintln("failed to create id pipeline layout")
         os.exit(1)
     }
@@ -41,8 +51,9 @@ createPipelines :: proc(using ctx: ^Context) {
 
 createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     // Load shader modules
-    vertShaderCode, _ := os.read_entire_file_from_filename("shaders/vert.spv")
-    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/frag.spv")
+
+    vertShaderCode, _:= os.read_entire_file_from_filename("shaders/vert.spv")
+    fragShaderCode, _:= os.read_entire_file_from_filename("shaders/frag.spv")
     defer delete(vertShaderCode)
     defer delete(fragShaderCode)
 
@@ -179,8 +190,9 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
 
 createIdPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     // Load ID shader modules
-    vertShaderCode, _ := os.read_entire_file_from_filename("shaders/id.vert.spv")
-    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/id.frag.spv")
+    vertShaderCode, _:= os.read_entire_file_from_filename("shaders/id-vert.spv") 
+    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/id-frag.spv")
+
     defer delete(vertShaderCode)
     defer delete(fragShaderCode)
 

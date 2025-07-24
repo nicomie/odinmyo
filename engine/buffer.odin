@@ -4,6 +4,9 @@ import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
 import "core:mem"
+import "core:math/linalg"
+import "core:math"
+
 
 Buffer :: struct
 {
@@ -168,17 +171,31 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
     vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["id"])
     vk.CmdBindDescriptorSets(buffer, .GRAPHICS, idPipelineLayout, 0, 1, &idDescriptorSets[currentFrame], 0, nil)
 
-    for mesh,i in meshes {
+ 
+    for &mesh,i in meshes {
+        angle := math.to_radians_f32(90) * timeContext.timeElapsed
+        axis := linalg.Vector3f32{0, 0, 1}
+        model := linalg.matrix4_rotate(angle, axis)
+        mesh.transform = model
+
         ubo: UBO
-        ubo.model = mesh.transform
         ubo.view = camera.view
         ubo.proj = camera.projection
-        ubo.objectId = cast(u32)i + 2
         
         mem.copy(uniformBuffersMapped[currentFrame], &ubo, size_of(ubo))
 
         vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
         offsets := [?]vk.DeviceSize{0}
+
+        vk.CmdPushConstants(
+            buffer, 
+            meshPipelineLayout,
+            {.VERTEX}, 
+            0, 
+            size_of(linalg.Matrix4x4f32), 
+            &model
+        )
+
         vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
         vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT16)
         vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
@@ -229,13 +246,29 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     vk.CmdSetScissor(buffer, 0, 1, &scissor)
 
     vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["mesh"])
-    for mesh in meshes {
+
+    vk.CmdBindDescriptorSets(buffer, vk.PipelineBindPoint.GRAPHICS,
+                        meshPipelineLayout, 
+                        0, 1, &descriptorSets[currentFrame], 0, nil);
+
+    for &mesh in meshes {
+    
         vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
         offsets := [?]vk.DeviceSize{0}
+
+
+        vk.CmdPushConstants(
+            buffer, 
+            meshPipelineLayout,
+            {.VERTEX}, 
+            0, 
+            size_of(linalg.Matrix4x4f32), 
+            &mesh.transform
+        )
+
         vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
         vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT16)
-        vk.CmdBindDescriptorSets(buffer, .GRAPHICS, meshPipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nil)
-       vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
+        vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
     }
 
     vk.CmdEndRenderPass(buffer)

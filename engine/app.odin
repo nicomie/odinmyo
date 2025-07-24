@@ -59,7 +59,7 @@ Context :: struct {
     texture: Image,
     textureImageView: vk.ImageView,
     textureSampler: vk.Sampler,
-
+    
     depthImage: DepthImage,
     colorImage: DepthImage,
    
@@ -228,21 +228,6 @@ exit :: proc(using ctx: ^Context) {
     sdl.Quit()
 }
 
-mouseAction:: proc(using ctx: ^Context, mouseX, mouseY: i32) {
-    ctx.clickPending = true
-    ctx.clickX = mouseX
-    ctx.clickY = mouseY
-    ctx.clickyXDelta = 0
-    ctx.clickyYDelta = 0
-}
-
-
-mouseRealease :: proc(using ctx: ^Context) {
-    ctx.clickPending = false
-    ctx.clickyXDelta = 0
-    ctx.clickyYDelta = 0
-}
-
 run :: proc(using ctx: ^Context) {
 
     loop: for {
@@ -261,51 +246,47 @@ run :: proc(using ctx: ^Context) {
                     }
                 case .MOUSEBUTTONDOWN:
                     if event.button.button == sdl.BUTTON_MIDDLE { 
-                        mouseAction(ctx, event.button.x, event.button.y)
+                        ctx.clickPending = true
+                        ctx.clickX = event.button.x
+                        ctx.clickY = event.button.y
                         fmt.printf("Middle mouse button at (%d, %d)\n", event.button.x, event.button.y)
 
                     }
                 case .MOUSEBUTTONUP:
                     if event.button.button == sdl.BUTTON_MIDDLE {
+                        ctx.clickPending = false
                         fmt.printf("Middle mouse button released at (%d, %d)\n", event.button.x, event.button.y)
-                        mouseRealease(ctx)
+
                     }
+                case .MOUSEMOTION:
+                    if ctx.clickPending {
+                        deltaX := f32(event.motion.xrel)
+                        deltaY := f32(event.motion.yrel)
+
+                        sensitivity := f32(0.005)
+                        camera.yaw -= deltaX * sensitivity
+                        camera.pitch -= deltaY * sensitivity
+
+                        camera.yaw = math.mod(camera.yaw, math.TAU)
+                        camera.pitch = math.mod(camera.pitch, math.TAU)
+                    }
+                case .MOUSEWHEEL:
+                       zoom_speed := f32(0.5)
+                        camera.distance -= f32(event.wheel.y) * zoom_speed
+                        camera.distance = math.max(camera.distance, 0.1)
                 case .QUIT:
                     break loop
-            }      
-            if ctx.clickPending {
-                mx, my : i32
-                sdl.GetMouseState(&mx, &my)
-                ctx.clickyXDelta = mx - ctx.clickX
-                ctx.clickyYDelta = my - ctx.clickY
-                ctx.clickX = mx
-                ctx.clickY = my
-                //fmt.printf("Mouse held at (%d, %d)\n", mx, my)
-
-                sensitivity: f32 = 0.005
-                camera.yaw   -= f32(ctx.clickyXDelta) * sensitivity
-                camera.pitch -= f32(ctx.clickyYDelta) * sensitivity
-
-                max_pitch := math.PI/2 - 0.05
-                min_pitch := -math.PI/2 + 0.05
-                camera.pitch = math.clamp(camera.pitch, f32(min_pitch), f32(max_pitch))
-
-                camera.distance = math.max(camera.distance, 0.1)
-
-                x := camera.target.x + camera.distance * math.cos(camera.pitch) * math.sin(camera.yaw)
-                y := camera.target.y + camera.distance * math.sin(camera.pitch)
-                z := camera.target.z + camera.distance * math.cos(camera.pitch) * math.cos(camera.yaw)
-                camera.position = linalg.Vector4f32{x, y, z, 1}
             }      
         }
         key_state := sdl.GetKeyboardState(nil)
         move_speed :: 5.0
-        if key_state[sdl.SCANCODE_UP] != 0 do camera.position.y -= move_speed * ctx.timeContext.deltaTime
-        if key_state[sdl.SCANCODE_DOWN] != 0 do camera.position.y += move_speed * ctx.timeContext.deltaTime
-        if key_state[sdl.SCANCODE_LEFT] != 0 do camera.position.x -= move_speed * ctx.timeContext.deltaTime
-        if key_state[sdl.SCANCODE_RIGHT] != 0 do camera.position.x += move_speed * ctx.timeContext.deltaTime
+        if key_state[sdl.SCANCODE_UP] != 0 do camera.target.y += move_speed * ctx.timeContext.deltaTime
+        if key_state[sdl.SCANCODE_DOWN] != 0 do camera.target.y -= move_speed * ctx.timeContext.deltaTime
+        if key_state[sdl.SCANCODE_LEFT] != 0 do camera.target.x -= move_speed * ctx.timeContext.deltaTime
+        if key_state[sdl.SCANCODE_RIGHT] != 0 do camera.target.x += move_speed * ctx.timeContext.deltaTime
         
-  
+       
+        updateCameraPosition(ctx)
         drawFrame(ctx)
     
         frame_time := time.duration_seconds(time.diff(frame_start, time.now()))

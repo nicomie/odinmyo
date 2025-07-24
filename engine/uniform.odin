@@ -9,11 +9,8 @@ import "core:mem"
 import cr "../engine/core"
 
 UBO :: struct{
-    model: linalg.Matrix4f32,
     view: linalg.Matrix4f32,
     proj: linalg.Matrix4f32,
-    objectId: u32,
-    _padding: [12]u8,
 }
 
 createUniformBuffers :: proc(using ctx: ^Context) {
@@ -29,29 +26,17 @@ createUniformBuffers :: proc(using ctx: ^Context) {
 }
 
 updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
-
-
-    cam_pos := linalg.Vector3f32{camera.position.x, camera.position.y, camera.position.z}
-    target := cam_pos + linalg.Vector3f32{0, 0, -1} 
-    up := linalg.Vector3f32{0, 1, 0} 
-    view := linalg.matrix4_look_at_f32(
-        camera.position.xyz, 
-        target,             
-        up,                 
-        true
-    )
-
-    proj := camera.projection
-    proj[1][1] *= -1
-
     angle := math.to_radians_f32(90) * timeContext.timeElapsed
     axis := linalg.Vector3f32{0, 0, 1}
     model := linalg.matrix4_rotate(angle, axis)
-
+    
+    for &mesh in meshes {
+        mesh.transform = linalg.MATRIX4F32_IDENTITY
+    }
+    
     ubo: UBO
-    ubo.model = model
-    ubo.view = view
-    ubo.proj = proj
+    ubo.view = camera.view
+    ubo.proj = camera.projection
 
-    mem.copy(uniformBuffersMapped[currentImage], &ubo, size_of(ubo));
+    mem.copy(uniformBuffersMapped[currentImage], &ubo, size_of(ubo))
 }
