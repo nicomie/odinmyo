@@ -58,37 +58,43 @@ SwapchainContext :: struct {
 
 FrameContext :: struct {
     commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+    idCommandBuffer: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 
     imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
     renderFinishedSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
     inFlightFences: [MAX_FRAMES_IN_FLIGHT]vk.Fence,
 }
 
-Context :: struct {
+PipelineContext :: struct {
     pipelines: map[string]vk.Pipeline, 
+    meshPipelineLayout: vk.PipelineLayout,
+    descriptorPool: vk.DescriptorPool,
+    descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
+    idDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+    descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+ResourceContext :: struct {
+   
+}
+
+Context :: struct {
+    
     platform: PlatformContext,
     vulkan: VulkanContext,
     sc: SwapchainContext,
     frame: FrameContext,
+    pipe: PipelineContext,
     
-    meshPipelineLayout: vk.PipelineLayout,
     commandPool: vk.CommandPool,
-    
-    idCommandBuffer: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-    
+
     currentFrame :u32,
     framebufferResized :bool,
 
     uniformBuffers: []Buffer,
     uniformBuffersMapped: []rawptr,
-   
-    descriptorPool: vk.DescriptorPool,
-    descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
-    idDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-    descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 
     texture: Texture,
-    
     
     camera: Camera,
     ray: Ray,
@@ -194,6 +200,7 @@ exit :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.sc
     using ctx.frame
+    using ctx.pipe
     cleanSwapchain(ctx)
 
     vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)

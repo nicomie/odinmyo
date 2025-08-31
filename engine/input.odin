@@ -5,8 +5,10 @@ import "core:fmt"
 import "core:os"
 
 handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
+    using ctx.pipe
     using ctx.platform
     using ctx.vulkan
+    using ctx.frame
     clickPending = true
     clickX = x
     clickY = y

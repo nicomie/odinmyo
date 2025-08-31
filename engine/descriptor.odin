@@ -39,6 +39,7 @@ DescriptorSetLayout :: struct {
 
 createDescriptorSetLayouts :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.pipe
     meshDescriptorSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
         {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX}}, 
         {binding = 1, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}}, 
@@ -84,6 +85,7 @@ createDescriptorSetLayout :: proc(device: vk.Device, descriptorSets: []Descripto
 
 createDescriptorSets :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.pipe
     meshLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         meshLayouts[i] = descriptorSetLayouts["mesh"]
@@ -142,6 +144,7 @@ createDescriptorSets :: proc(using ctx: ^Context) {
 
 createIdDescriptorSets :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.pipe
     idLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         idLayouts[i] = descriptorSetLayouts["id"]
@@ -184,7 +187,7 @@ createIdDescriptorSets :: proc(using ctx: ^Context) {
 
 createDescriptorPool :: proc(using ctx: ^Context) {
     using ctx.vulkan
-
+    using ctx.pipe
     poolSizes := []vk.DescriptorPoolSize{
         {
             type = .UNIFORM_BUFFER,
