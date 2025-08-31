@@ -75,7 +75,10 @@ PipelineContext :: struct {
 }
 
 ResourceContext :: struct {
-   
+    uniformBuffers: []Buffer,
+    uniformBuffersMapped: []rawptr,
+    texture: Texture,
+    meshes: [dynamic]MeshObject,
 }
 
 Context :: struct {
@@ -85,21 +88,16 @@ Context :: struct {
     sc: SwapchainContext,
     frame: FrameContext,
     pipe: PipelineContext,
+    resource: ResourceContext,
     
     commandPool: vk.CommandPool,
 
     currentFrame :u32,
     framebufferResized :bool,
 
-    uniformBuffers: []Buffer,
-    uniformBuffersMapped: []rawptr,
-
-    texture: Texture,
-    
     camera: Camera,
     ray: Ray,
-    meshes: [dynamic]MeshObject,
-
+    
     idStagingBuffer: Buffer,
     idStagingBufferMemory: vk.DeviceMemory,
     idPipelineLayout: vk.PipelineLayout,
@@ -201,6 +199,7 @@ exit :: proc(using ctx: ^Context) {
     using ctx.sc
     using ctx.frame
     using ctx.pipe
+    using ctx.resource
     cleanSwapchain(ctx)
 
     vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)

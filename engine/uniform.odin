@@ -15,6 +15,7 @@ UBO :: struct{
 
 createUniformBuffers :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.resource
     bufferSize := cast(vk.DeviceSize)size_of(UBO)
 
     uniformBuffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
@@ -28,6 +29,7 @@ createUniformBuffers :: proc(using ctx: ^Context) {
 
 updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     using ctx.platform
+    using ctx.resource
     angle := math.to_radians_f32(90) * timeContext.timeElapsed
     axis := linalg.Vector3f32{0, 0, 1}
     model := linalg.matrix4_rotate(angle, axis)

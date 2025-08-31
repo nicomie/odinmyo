@@ -34,11 +34,13 @@ MeshObject :: struct {
 }
 
 loadTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
+    using ctx.resource
     s := [?]string{"textures/", string(data.images[0].uri)}
     texture.uri = strings.clone_to_cstring(strings.concatenate(s[:]))
 }
 
 setupGlb :: proc(using ctx: ^Context) {
+    using ctx.resource
     v, i := loadGlbModel(ctx)
     vBuffer: Buffer
     iBuffer: Buffer

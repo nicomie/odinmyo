@@ -115,6 +115,7 @@ usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
 }
 
 createTextureImageView :: proc(using ctx: ^Context) {    
+    using ctx.resource
     texture.view = createImageView(ctx, texture.handle.texture, .R8G8B8A8_SRGB, {.COLOR}, texture.mips, "texture")
 }
 
@@ -125,6 +126,7 @@ createIdImageView :: proc(using ctx: ^Context) {
 
 createTextureImage :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.resource
 
     f := libc.fopen(texture.uri, "rb")
     if f == nil {
@@ -169,6 +171,7 @@ createTextureImage :: proc(using ctx: ^Context) {
 
 createTextureSampler ::proc(using ctx:^Context) {
     using ctx.vulkan
+    using ctx.resource
 
     properties: vk.PhysicalDeviceProperties
     vk.GetPhysicalDeviceProperties(physicalDevice, &properties)

@@ -83,6 +83,7 @@ createIdResource :: proc(using ctx: ^Context) {
 
 generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image, w,h: i32) {
     using ctx.vulkan
+    using ctx.resource
     formatProperties : vk.FormatProperties
     vk.GetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties)
 

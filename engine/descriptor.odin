@@ -86,6 +86,7 @@ createDescriptorSetLayout :: proc(device: vk.Device, descriptorSets: []Descripto
 createDescriptorSets :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.pipe
+    using ctx.resource
     meshLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         meshLayouts[i] = descriptorSetLayouts["mesh"]
@@ -145,6 +146,7 @@ createDescriptorSets :: proc(using ctx: ^Context) {
 createIdDescriptorSets :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.pipe
+    using ctx.resource
     idLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         idLayouts[i] = descriptorSetLayouts["id"]

@@ -130,6 +130,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
     using ctx.platform
     using ctx.sc
     using ctx.pipe
+    using ctx.resource
     beginInfo := vk.CommandBufferBeginInfo{
         sType = .COMMAND_BUFFER_BEGIN_INFO,
         flags = {.ONE_TIME_SUBMIT}
@@ -218,6 +219,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
 recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
     using ctx.sc
     using ctx.pipe
+    using ctx.resource
     beginInfo: vk.CommandBufferBeginInfo
     beginInfo.sType = .COMMAND_BUFFER_BEGIN_INFO
     beginInfo.pInheritanceInfo = nil
@@ -287,6 +289,7 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
 }
 
 copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
+    using ctx.resource
     cmdBuffer := beginCommand(ctx)
     defer endCommand(ctx, &cmdBuffer)
 
