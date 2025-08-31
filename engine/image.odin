@@ -35,6 +35,7 @@ createImageView :: proc(
     mips: u32,
     name: cstring,
 ) -> vk.ImageView {
+    using ctx.vulkan
 
     viewInfo := vk.ImageViewCreateInfo{
         sType = .IMAGE_VIEW_CREATE_INFO,
@@ -68,6 +69,7 @@ createImageView :: proc(
 
 createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCountFlags, format: vk.Format, tiling: vk.ImageTiling, 
 usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
+    using ctx.vulkan
     
     imageInfo := vk.ImageCreateInfo{
         sType = .IMAGE_CREATE_INFO,
@@ -121,6 +123,7 @@ createIdImageView :: proc(using ctx: ^Context) {
 }
 
 createTextureImage :: proc(using ctx: ^Context) {
+    using ctx.vulkan
 
     f := libc.fopen(texture.uri, "rb")
     if f == nil {
@@ -164,6 +167,7 @@ createTextureImage :: proc(using ctx: ^Context) {
 }
 
 createTextureSampler ::proc(using ctx:^Context) {
+    using ctx.vulkan
 
     properties: vk.PhysicalDeviceProperties
     vk.GetPhysicalDeviceProperties(physicalDevice, &properties)

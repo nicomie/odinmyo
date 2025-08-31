@@ -68,6 +68,7 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
 }
 
 createLogicalDevice :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     findQueueFamilies(ctx)
 
     infos: [dynamic]vk.DeviceQueueCreateInfo
@@ -141,6 +142,7 @@ checkDeviceExtensionSupport :: proc (device: vk.PhysicalDevice) -> bool {
 }
 
 findQueueFamilies :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     count: u32;
     vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &count, nil)
 

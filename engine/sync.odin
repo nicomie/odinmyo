@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 
 createSyncObjects :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     semaphoreInfo: vk.SemaphoreCreateInfo
     semaphoreInfo.sType = .SEMAPHORE_CREATE_INFO
 

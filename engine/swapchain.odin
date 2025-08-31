@@ -92,6 +92,7 @@ clamp :: proc(value, min, max: u32) -> u32  {
 }  
 
 createSwapchain :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     swapChainSupport := querySwapChainSupport(physicalDevice, ctx)
 
     surfaceFormat := chooseSwapSurfaceFormat(&swapChainSupport.formats)
@@ -146,6 +147,7 @@ createSwapchain :: proc(using ctx: ^Context) {
 
 recreateSwapchain :: proc(using ctx: ^Context) {
     using ctx.platform
+    using ctx.vulkan
     windowSurface := sdl.GetWindowSurface(window)
     if (windowSurface.h == 0 || windowSurface.w == 0) {
         sdl.GetWindowSurface(window)
@@ -163,6 +165,7 @@ recreateSwapchain :: proc(using ctx: ^Context) {
 }
 
 cleanSwapchain :: proc(using ctx: ^Context) {   
+    using ctx.vulkan
     vk.DestroyImageView(device, colorImage.view, nil)
     vk.DestroyImage(device, colorImage.image.texture, nil)
     vk.FreeMemory(device, colorImage.image.memory, nil)

@@ -39,6 +39,7 @@ PlatformContext :: struct {
 
 VulkanContext :: struct {
     instance: vk.Instance,
+    device: vk.Device,
 }
 
 Context :: struct {
@@ -48,7 +49,7 @@ Context :: struct {
     
     debugMessenger: vk.DebugUtilsMessengerEXT,
     physicalDevice: vk.PhysicalDevice,
-    device: vk.Device,
+    
     queueIndices: [QueueFamily]int,
     graphicsQueue: vk.Queue,
     surface: vk.SurfaceKHR,
@@ -244,6 +245,7 @@ exit :: proc(using ctx: ^Context) {
 
 run :: proc(using ctx: ^Context) {
     using ctx.platform
+    using ctx.vulkan
 
     loop: for {
         target_frame_time := 1.0 / 240.0

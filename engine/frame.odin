@@ -6,6 +6,7 @@ import "core:os"
 
 drawFrame :: proc(using ctx: ^Context) {
     using ctx.platform
+    using ctx.vulkan
     vk.WaitForFences(device, 1, &inFlightFences[currentFrame], true, max(u64))
     vk.ResetFences(device, 1, &inFlightFences[currentFrame])
 

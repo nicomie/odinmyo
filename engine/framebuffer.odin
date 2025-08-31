@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 
 createFramebuffer :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     swapchain.framebuffers = make([]vk.Framebuffer, len(swapchain.imageViews))
 
     for i in 0..<len(swapchain.imageViews) {
@@ -28,6 +29,7 @@ createFramebuffer :: proc(using ctx: ^Context) {
 }
 
 createObjectIdFramebuffer :: proc (using ctx: ^Context) {
+    using ctx.vulkan
     attachments := []vk.ImageView{idImage.view, depthImage.view}
 
     framebufferInfo: vk.FramebufferCreateInfo

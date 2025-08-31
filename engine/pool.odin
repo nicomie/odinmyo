@@ -6,6 +6,7 @@ import "core:os"
 
 
 createCommandPool :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     poolInfo : vk.CommandPoolCreateInfo
     poolInfo.sType = .COMMAND_POOL_CREATE_INFO 
     poolInfo.flags = {.RESET_COMMAND_BUFFER}

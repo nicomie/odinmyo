@@ -14,6 +14,7 @@ UBO :: struct{
 }
 
 createUniformBuffers :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     bufferSize := cast(vk.DeviceSize)size_of(UBO)
 
     uniformBuffers = make([]Buffer, MAX_FRAMES_IN_FLIGHT)

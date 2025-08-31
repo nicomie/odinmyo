@@ -13,7 +13,7 @@ RenderPassConfig :: struct  {
 }
 
 createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.RenderPass{
-
+    using ctx.vulkan
     attachments := [dynamic]vk.AttachmentDescription{}
     attachment_refs := [dynamic]vk.AttachmentReference{}
 
@@ -84,7 +84,7 @@ createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.Re
     }
 
     render_pass: vk.RenderPass
-    if vk.CreateRenderPass(ctx.device, &render_pass_info, nil, &render_pass) != .SUCCESS {
+    if vk.CreateRenderPass(device, &render_pass_info, nil, &render_pass) != .SUCCESS {
         fmt.eprintln("failed to create render pass")
         os.exit(1)
     }

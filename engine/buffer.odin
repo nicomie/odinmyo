@@ -24,6 +24,7 @@ createBuffer :: proc(
     buffer: ^Buffer,
     data: rawptr = nil
 ) {
+    using ctx.vulkan
     
     bufferInfo := vk.BufferCreateInfo{
         sType = .BUFFER_CREATE_INFO,
@@ -65,6 +66,7 @@ copyBuffer :: proc(using ctx: ^Context, src, dst: Buffer, size: vk.DeviceSize) {
 }
 
 createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) -> Buffer {
+    using ctx.vulkan
     buffer: Buffer
     buffer.length = len(vertices)
     buffer.size = cast(vk.DeviceSize)(len(vertices) * size_of(Vertex))
@@ -82,6 +84,7 @@ createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) -> Buffer {
 }
 
 createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) -> Buffer{
+    using ctx.vulkan
     buffer: Buffer
     buffer.length = len(indices)
     buffer.size = cast(vk.DeviceSize)(len(indices) * size_of(indices[0]))
@@ -104,6 +107,7 @@ createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) -> Buffer{
 }
 
 createCommandBuffers :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     allocInfo: vk.CommandBufferAllocateInfo
     allocInfo.sType = .COMMAND_BUFFER_ALLOCATE_INFO
     allocInfo.commandPool = commandPool 
