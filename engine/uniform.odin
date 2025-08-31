@@ -30,6 +30,7 @@ createUniformBuffers :: proc(using ctx: ^Context) {
 updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     using ctx.platform
     using ctx.resource
+    using ctx.scene
     angle := math.to_radians_f32(90) * timeContext.timeElapsed
     axis := linalg.Vector3f32{0, 0, 1}
     model := linalg.matrix4_rotate(angle, axis)

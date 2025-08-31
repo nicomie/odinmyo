@@ -8,12 +8,11 @@ drawFrame :: proc(using ctx: ^Context) {
     using ctx.platform
     using ctx.vulkan
     using ctx.sc
-    using ctx.frame
-    vk.WaitForFences(device, 1, &inFlightFences[currentFrame], true, max(u64))
-    vk.ResetFences(device, 1, &inFlightFences[currentFrame])
+    vk.WaitForFences(device, 1, &ctx.frames[currentFrame].inFlightFences, true, max(u64))
+    vk.ResetFences(device, 1, &ctx.frames[currentFrame].inFlightFences)
 
     imageIndex: u32
-    res := vk.AcquireNextImageKHR(device, swapchain.handle, max(u64), imageAvailableSemaphores[currentFrame], {}, &imageIndex)
+    res := vk.AcquireNextImageKHR(device, swapchain.handle, max(u64), ctx.frames[currentFrame].imageAvailableSemaphores, {}, &imageIndex)
     if res == .ERROR_OUT_OF_DATE_KHR {
         recreateSwapchain(ctx)
         return
@@ -22,13 +21,13 @@ drawFrame :: proc(using ctx: ^Context) {
         os.exit(1)
     }
 
-    vk.ResetFences(device, 1, &inFlightFences[currentFrame])
+    vk.ResetFences(device, 1, &ctx.frames[currentFrame].inFlightFences)
 
-    vk.ResetCommandBuffer(commandBuffers[currentFrame], {})
+    vk.ResetCommandBuffer(ctx.frames[currentFrame].commandBuffers, {})
     updateUniformBuffer(ctx, currentFrame)
-    recordCommandBuffer(ctx, commandBuffers[currentFrame], imageIndex)
+    recordCommandBuffer(ctx, ctx.frames[currentFrame].commandBuffers, imageIndex)
 
-    waitSemaphores := [?]vk.Semaphore{imageAvailableSemaphores[currentFrame]}
+    waitSemaphores := [?]vk.Semaphore{ctx.frames[currentFrame].imageAvailableSemaphores}
     waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
 
 
@@ -42,13 +41,13 @@ drawFrame :: proc(using ctx: ^Context) {
     submitInfo.pWaitSemaphores= &waitSemaphores[0] 
     submitInfo.pWaitDstStageMask = &waitStages[0]
     submitInfo.commandBufferCount = 1
-    submitInfo.pCommandBuffers = &commandBuffers[currentFrame] 
+    submitInfo.pCommandBuffers = &ctx.frames[currentFrame].commandBuffers
 
-    signalSemaphores := [?]vk.Semaphore{renderFinishedSemaphores[currentFrame]}
+    signalSemaphores := [?]vk.Semaphore{ctx.frames[currentFrame].renderFinishedSemaphores}
     submitInfo.signalSemaphoreCount = 1
     submitInfo.pSignalSemaphores = &signalSemaphores[0]
 
-    if vk.QueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != .SUCCESS {
+    if vk.QueueSubmit(graphicsQueue, 1, &submitInfo, ctx.frames[currentFrame].inFlightFences) != .SUCCESS {
         fmt.eprintln("failed to submit draw command buffer")
         os.exit(1)
     }

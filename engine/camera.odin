@@ -25,6 +25,7 @@ Camera :: struct {
 
 initCamera :: proc(using ctx: ^Context) {
     using ctx.sc
+    using ctx.scene
     camera.target = linalg.Vector3f32{0, 0, 0}
     camera.distance = 5.0 
     camera.yaw = 0.0
@@ -43,6 +44,7 @@ initCamera :: proc(using ctx: ^Context) {
 }
 
 updateCameraPosition :: proc(using ctx: ^Context) {
+    using ctx.scene
     q_yaw := linalg.quaternion_angle_axis_f32(-camera.yaw, linalg.Vector3f32{0, 1, 0})
     q_pitch := linalg.quaternion_angle_axis_f32(-camera.pitch, linalg.Vector3f32{1, 0, 0})
     orientation := linalg.mul(q_yaw, q_pitch)

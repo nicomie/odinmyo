@@ -6,7 +6,6 @@ import "core:os"
 
 createSyncObjects :: proc(using ctx: ^Context) {
     using ctx.vulkan
-    using ctx.frame
     semaphoreInfo: vk.SemaphoreCreateInfo
     semaphoreInfo.sType = .SEMAPHORE_CREATE_INFO
 
@@ -15,9 +14,9 @@ createSyncObjects :: proc(using ctx: ^Context) {
     fenceInfo.flags = {.SIGNALED}
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        if vk.CreateSemaphore(device, &semaphoreInfo, nil, &imageAvailableSemaphores[i]) != .SUCCESS ||
-        vk.CreateSemaphore(device, &semaphoreInfo, nil, &renderFinishedSemaphores[i]) != .SUCCESS ||
-        vk.CreateFence(device, &fenceInfo, nil, &inFlightFences[i]) != .SUCCESS {
+        if vk.CreateSemaphore(device, &semaphoreInfo, nil, &ctx.frames[i].imageAvailableSemaphores) != .SUCCESS ||
+        vk.CreateSemaphore(device, &semaphoreInfo, nil, &ctx.frames[i].renderFinishedSemaphores) != .SUCCESS ||
+        vk.CreateFence(device, &fenceInfo, nil, &ctx.frames[i].inFlightFences) != .SUCCESS {
             fmt.eprintln("failed to create semaphores")
             os.exit(1)
         }

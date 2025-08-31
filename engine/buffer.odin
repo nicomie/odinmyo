@@ -108,19 +108,19 @@ createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) -> Buffer{
 
 createCommandBuffers :: proc(using ctx: ^Context) {
     using ctx.vulkan
-    using ctx.frame
+    using ctx.id
     allocInfo: vk.CommandBufferAllocateInfo
     allocInfo.sType = .COMMAND_BUFFER_ALLOCATE_INFO
     allocInfo.commandPool = commandPool 
     allocInfo.level = .PRIMARY
     allocInfo.commandBufferCount = MAX_FRAMES_IN_FLIGHT
 
-    if vk.AllocateCommandBuffers(device, &allocInfo, &commandBuffers[0]) != .SUCCESS {
+    if vk.AllocateCommandBuffers(device, &allocInfo, &ctx.frames[0].commandBuffers) != .SUCCESS {
         fmt.eprintln("failed to create command buffer")
         os.exit(1)
     }
 
-    if vk.AllocateCommandBuffers(device, &allocInfo, &idCommandBuffer[0]) != .SUCCESS {
+    if vk.AllocateCommandBuffers(device, &allocInfo, &ctx.frames[0].idCommandBuffer) != .SUCCESS {
         fmt.eprintln("failed to create command buffer")
         os.exit(1)
     }
@@ -132,6 +132,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
     using ctx.pipe
     using ctx.resource
     using ctx.id
+    using ctx.scene
     beginInfo := vk.CommandBufferBeginInfo{
         sType = .COMMAND_BUFFER_BEGIN_INFO,
         flags = {.ONE_TIME_SUBMIT}

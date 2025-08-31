@@ -8,7 +8,6 @@ handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
     using ctx.pipe
     using ctx.platform
     using ctx.vulkan
-    using ctx.frame
     clickPending = true
     clickX = x
     clickY = y
@@ -16,7 +15,7 @@ handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
     submitInfo := vk.SubmitInfo{
         sType = .SUBMIT_INFO,
         commandBufferCount = 1,
-        pCommandBuffers = &idCommandBuffer[currentFrame],
+        pCommandBuffers = &ctx.frames[currentFrame].idCommandBuffer,
     }
     vk.QueueSubmit(graphicsQueue, 1, &submitInfo, {})
 }

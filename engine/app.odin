@@ -46,6 +46,7 @@ VulkanContext :: struct {
     surface: vk.SurfaceKHR,
     debugMessenger: vk.DebugUtilsMessengerEXT,
     presentQueue: vk.Queue,
+    commandPool: vk.CommandPool,
 }
 
 SwapchainContext :: struct {
@@ -57,12 +58,12 @@ SwapchainContext :: struct {
 }
 
 FrameContext :: struct {
-    commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-    idCommandBuffer: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+    commandBuffers: vk.CommandBuffer,
+    idCommandBuffer: vk.CommandBuffer,
 
-    imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-    renderFinishedSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-    inFlightFences: [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+    imageAvailableSemaphores: vk.Semaphore,
+    renderFinishedSemaphores: vk.Semaphore,
+    inFlightFences: vk.Fence,
 }
 
 PipelineContext :: struct {
@@ -81,6 +82,7 @@ IdPipelineContext :: struct {
     idImage: DepthImage,
     idRenderPass: vk.RenderPass,
     idFramebuffer: vk.Framebuffer,
+    
 }
 
 ResourceContext :: struct {
@@ -90,26 +92,24 @@ ResourceContext :: struct {
     meshes: [dynamic]MeshObject,
 }
 
+SceneContext :: struct {
+    camera: Camera,
+    ray: Ray,
+    toggleHover: bool,
+}
+
 Context :: struct {
-    
     platform: PlatformContext,
     vulkan: VulkanContext,
     sc: SwapchainContext,
-    frame: FrameContext,
     pipe: PipelineContext,
     resource: ResourceContext,
     id: IdPipelineContext,
-    
-    commandPool: vk.CommandPool,
+    scene: SceneContext,
 
+    frames: [MAX_FRAMES_IN_FLIGHT]FrameContext,
     currentFrame :u32,
-    framebufferResized :bool,
-
-    camera: Camera,
-    ray: Ray,
-    
-    toggleHover: bool,
-    
+    framebufferResized :bool,  
 }
 
 
@@ -203,7 +203,6 @@ exit :: proc(using ctx: ^Context) {
     using ctx.platform
     using ctx.vulkan
     using ctx.sc
-    using ctx.frame
     using ctx.pipe
     using ctx.resource
     using ctx.id
@@ -253,9 +252,9 @@ exit :: proc(using ctx: ^Context) {
     vk.DestroyRenderPass(device, idRenderPass, nil)
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        vk.DestroySemaphore(device, imageAvailableSemaphores[i], nil);
-        vk.DestroySemaphore(device, renderFinishedSemaphores[i], nil);
-        vk.DestroyFence(device, inFlightFences[i], nil);
+        vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphores, nil);
+        vk.DestroySemaphore(device, ctx.frames[i].renderFinishedSemaphores, nil);
+        vk.DestroyFence(device, ctx.frames[i].inFlightFences, nil);
     }
    
     vk.DestroyCommandPool(device, commandPool, nil)   
@@ -272,7 +271,7 @@ exit :: proc(using ctx: ^Context) {
 run :: proc(using ctx: ^Context) {
     using ctx.platform
     using ctx.vulkan
-
+    using ctx.scene
     loop: for {
         target_frame_time := 1.0 / 240.0
         frame_start := time.now()
