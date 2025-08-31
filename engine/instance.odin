@@ -7,6 +7,8 @@ import "core:os"
 
 
 create_instance :: proc(using ctx: ^Context) {
+    using ctx.platform
+    using ctx.vulkan
     appInfo: vk.ApplicationInfo
     appInfo.sType = .APPLICATION_INFO
     appInfo.pApplicationName = "Hello triangle"

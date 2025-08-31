@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 
 drawFrame :: proc(using ctx: ^Context) {
+    using ctx.platform
     vk.WaitForFences(device, 1, &inFlightFences[currentFrame], true, max(u64))
     vk.ResetFences(device, 1, &inFlightFences[currentFrame])
 

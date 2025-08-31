@@ -21,13 +21,31 @@ import cr "../engine/core"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 
+Texture :: struct {
+    handle: Image,
+    view: vk.ImageView,
+    sampler: vk.Sampler,
+    mips: u32,
+    uri: cstring,
+}
+
+PlatformContext :: struct {
+    window: ^sdl.Window,
+    timeContext: ^cr.TimeContext,
+    clickPending: bool,
+    clickX, clickY: i32,
+    clickyXDelta, clickyYDelta: i32,
+}
+
+VulkanContext :: struct {
+    instance: vk.Instance,
+}
+
 Context :: struct {
     pipelines: map[string]vk.Pipeline, 
-
-    uri: cstring,
-    timeContext: ^cr.TimeContext,
-    window: ^sdl.Window,
-    instance: vk.Instance,
+    platform: PlatformContext,
+    vulkan: VulkanContext,
+    
     debugMessenger: vk.DebugUtilsMessengerEXT,
     physicalDevice: vk.PhysicalDevice,
     device: vk.Device,
@@ -55,10 +73,7 @@ Context :: struct {
     idDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
     descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 
-    mipLevels: u32,
-    texture: Image,
-    textureImageView: vk.ImageView,
-    textureSampler: vk.Sampler,
+    texture: Texture,
     
     depthImage: DepthImage,
     colorImage: DepthImage,
@@ -75,10 +90,6 @@ Context :: struct {
     idRenderPass: vk.RenderPass,
     toggleHover: bool,
     idFramebuffer: vk.Framebuffer,
-
-    clickPending: bool,
-    clickX, clickY: i32,
-    clickyXDelta, clickyYDelta: i32,
 }
 
 
@@ -95,6 +106,7 @@ Vertex :: struct{
 }
 
 initVulkan :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     getInstanceProcAddr := sdl.Vulkan_GetVkGetInstanceProcAddr()
     assert(getInstanceProcAddr != nil)
     vk.load_proc_addresses(getInstanceProcAddr)
@@ -166,6 +178,8 @@ initVulkan :: proc(using ctx: ^Context) {
 }
 
 exit :: proc(using ctx: ^Context) {
+    using ctx.platform
+    using ctx.vulkan
     cleanSwapchain(ctx)
 
     vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)
@@ -177,11 +191,11 @@ exit :: proc(using ctx: ^Context) {
     
     vk.DestroyFramebuffer(device, idFramebuffer, nil)
 
-    vk.DestroySampler(device, textureSampler, nil)
+    vk.DestroySampler(device, texture.sampler, nil)
     
-    vk.DestroyImageView(device, textureImageView, nil)
-    vk.DestroyImage(device, texture.texture, nil)
-    vk.FreeMemory(device, texture.memory, nil)
+    vk.DestroyImageView(device, texture.view, nil)
+    vk.DestroyImage(device, texture.handle.texture, nil)
+    vk.FreeMemory(device, texture.handle.memory, nil)
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         vk.DestroyBuffer(device, uniformBuffers[i].buffer, nil)
@@ -229,6 +243,7 @@ exit :: proc(using ctx: ^Context) {
 }
 
 run :: proc(using ctx: ^Context) {
+    using ctx.platform
 
     loop: for {
         target_frame_time := 1.0 / 240.0
@@ -246,20 +261,20 @@ run :: proc(using ctx: ^Context) {
                     }
                 case .MOUSEBUTTONDOWN:
                     if event.button.button == sdl.BUTTON_MIDDLE { 
-                        ctx.clickPending = true
-                        ctx.clickX = event.button.x
-                        ctx.clickY = event.button.y
+                        clickPending = true
+                        clickX = event.button.x
+                        clickY = event.button.y
                         fmt.printf("Middle mouse button at (%d, %d)\n", event.button.x, event.button.y)
 
                     }
                 case .MOUSEBUTTONUP:
                     if event.button.button == sdl.BUTTON_MIDDLE {
-                        ctx.clickPending = false
+                        clickPending = false
                         fmt.printf("Middle mouse button released at (%d, %d)\n", event.button.x, event.button.y)
 
                     }
                 case .MOUSEMOTION:
-                    if ctx.clickPending {
+                    if clickPending {
                         deltaX := f32(event.motion.xrel)
                         deltaY := f32(event.motion.yrel)
 
@@ -280,10 +295,10 @@ run :: proc(using ctx: ^Context) {
         }
         key_state := sdl.GetKeyboardState(nil)
         move_speed :: 5.0
-        if key_state[sdl.SCANCODE_UP] != 0 do camera.target.y += move_speed * ctx.timeContext.deltaTime
-        if key_state[sdl.SCANCODE_DOWN] != 0 do camera.target.y -= move_speed * ctx.timeContext.deltaTime
-        if key_state[sdl.SCANCODE_LEFT] != 0 do camera.target.x -= move_speed * ctx.timeContext.deltaTime
-        if key_state[sdl.SCANCODE_RIGHT] != 0 do camera.target.x += move_speed * ctx.timeContext.deltaTime
+        if key_state[sdl.SCANCODE_UP] != 0 do camera.target.y += move_speed * timeContext.deltaTime
+        if key_state[sdl.SCANCODE_DOWN] != 0 do camera.target.y -= move_speed * timeContext.deltaTime
+        if key_state[sdl.SCANCODE_LEFT] != 0 do camera.target.x -= move_speed * timeContext.deltaTime
+        if key_state[sdl.SCANCODE_RIGHT] != 0 do camera.target.x += move_speed * timeContext.deltaTime
         
        
         updateCameraPosition(ctx)
@@ -300,6 +315,7 @@ run :: proc(using ctx: ^Context) {
 
 main :: proc() {
     using ctx: Context
+    using ctx.platform
     timeContext = cr.init(); defer cr.end(timeContext)
     initWindow(&ctx)
     initContext(&ctx)

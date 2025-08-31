@@ -9,20 +9,21 @@ WINDOW_WIDTH  :: 1280
 WINDOW_HEIGHT :: 720
 
 initWindow :: proc (ctx: ^Context) {
+    using ctx.platform
     if sdl.Init(sdl.INIT_VIDEO) != 0 {
         fmt.eprintln("sdl_Init failed: ", sdl.GetError())
         return
     }
 
     // Create window
-    window := sdl.CreateWindow("Odin Vulkan Engine", sdl.WINDOWPOS_UNDEFINED, 
+    sdlWindow := sdl.CreateWindow("Odin Vulkan Engine", sdl.WINDOWPOS_UNDEFINED, 
     sdl.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, {.VULKAN, .RESIZABLE})
 
     fmt.println(window)
-    if window == nil {
+    if sdlWindow == nil {
         fmt.eprintln("Failed to create window: ", sdl.GetError())
         return
     }
 
-    ctx.window = window
+    window = sdlWindow
 }

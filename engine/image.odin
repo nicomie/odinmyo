@@ -112,7 +112,7 @@ usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
 }
 
 createTextureImageView :: proc(using ctx: ^Context) {    
-    textureImageView = createImageView(ctx, texture.texture, .R8G8B8A8_SRGB, {.COLOR}, mipLevels, "texture")
+    texture.view = createImageView(ctx, texture.handle.texture, .R8G8B8A8_SRGB, {.COLOR}, texture.mips, "texture")
 }
 
 
@@ -122,9 +122,9 @@ createIdImageView :: proc(using ctx: ^Context) {
 
 createTextureImage :: proc(using ctx: ^Context) {
 
-    f := libc.fopen(uri, "rb")
+    f := libc.fopen(texture.uri, "rb")
     if f == nil {
-        fmt.eprintf("failed to fopen file \n", uri)
+        fmt.eprintf("failed to fopen file \n", texture.uri)
         os.exit(1)
     }
     defer libc.fclose(f)
@@ -134,7 +134,7 @@ createTextureImage :: proc(using ctx: ^Context) {
     loadedImage := image.load_from_file(f, &w, &h, &channels, 4); defer image.image_free(loadedImage)
 
     max :=  w > h ? h : w
-    mipLevels = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
+    texture.mips = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
 
     if loadedImage == nil {
         fmt.eprintln("failed to load image via load_from_file")
@@ -152,14 +152,14 @@ createTextureImage :: proc(using ctx: ^Context) {
     mem.copy(data, loadedImage, cast(int)imageSize)
     vk.UnmapMemory(device, stagingBuffer.memory)
  
-    createImage(ctx, w32, h32, mipLevels, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture)
-    transitionImageLayout(ctx, texture.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, mipLevels)
+    createImage(ctx, w32, h32, texture.mips, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture.handle)
+    transitionImageLayout(ctx, texture.handle.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, texture.mips)
     copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32)
 
     vk.DestroyBuffer(device, stagingBuffer.buffer, nil)
     vk.FreeMemory(device, stagingBuffer.memory, nil)
 
-    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.texture, w, h)
+    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.handle.texture, w, h)
 
 }
 
@@ -183,11 +183,11 @@ createTextureSampler ::proc(using ctx:^Context) {
         compareOp = .ALWAYS,
         mipmapMode = .LINEAR,
         minLod =  0.0,
-        maxLod = f32(mipLevels),
+        maxLod = f32(texture.mips),
         mipLodBias = 0.0,
     }
 
-    if vk.CreateSampler(device, &samplerInfo, nil, &textureSampler) != .SUCCESS {
+    if vk.CreateSampler(device, &samplerInfo, nil, &texture.sampler) != .SUCCESS {
         fmt.eprintln("failed to CreateSampler")
         os.exit(1)
     }

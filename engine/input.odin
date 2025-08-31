@@ -5,9 +5,10 @@ import "core:fmt"
 import "core:os"
 
 handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
-    ctx.clickPending = true
-    ctx.clickX = x
-    ctx.clickY = y
+    using ctx.platform
+    clickPending = true
+    clickX = x
+    clickY = y
 
     submitInfo := vk.SubmitInfo{
         sType = .SUBMIT_INFO,
@@ -18,6 +19,7 @@ handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
 }
 
 processClick :: proc(using ctx: ^Context) {
+    using ctx.platform
     // Only copy the clicked pixel
     cmdBuffer := beginCommand(ctx)
     

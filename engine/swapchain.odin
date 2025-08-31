@@ -63,9 +63,10 @@ chooseSwapPresentMode :: proc(modes: ^[]vk.PresentModeKHR) -> vk.PresentModeKHR 
 }
 
 chooseSwapExtent :: proc(using ctx: ^Context, capabilities: ^vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
-   if capabilities.currentExtent.width != max(u32) {
+    using ctx.platform
+    if capabilities.currentExtent.width != max(u32) {
         return capabilities.currentExtent
-   } else {
+    } else {
     w,h : i32
     sdl.GL_GetDrawableSize(window, &w, &h)
     extent := vk.Extent2D {
@@ -144,6 +145,7 @@ createSwapchain :: proc(using ctx: ^Context) {
 }
 
 recreateSwapchain :: proc(using ctx: ^Context) {
+    using ctx.platform
     windowSurface := sdl.GetWindowSurface(window)
     if (windowSurface.h == 0 || windowSurface.w == 0) {
         sdl.GetWindowSurface(window)

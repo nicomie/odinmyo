@@ -65,6 +65,7 @@ populate_debug_messenger :: proc(info: ^vk.DebugUtilsMessengerCreateInfoEXT){
 }
 
 setup_debug_messenger :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     when ODIN_DEBUG {
         createInfo: vk.DebugUtilsMessengerCreateInfoEXT
         populate_debug_messenger(&createInfo)

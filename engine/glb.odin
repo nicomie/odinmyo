@@ -35,7 +35,7 @@ MeshObject :: struct {
 
 loadTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
     s := [?]string{"textures/", string(data.images[0].uri)}
-    uri = strings.clone_to_cstring(strings.concatenate(s[:]))
+    texture.uri = strings.clone_to_cstring(strings.concatenate(s[:]))
 }
 
 setupGlb :: proc(using ctx: ^Context) {

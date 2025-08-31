@@ -109,8 +109,8 @@ createDescriptorSets :: proc(using ctx: ^Context) {
 
         imageInfo := vk.DescriptorImageInfo{
             imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-            imageView = textureImageView,
-            sampler = textureSampler,
+            imageView = texture.view,
+            sampler = texture.sampler,
         }
 
         meshDescriptorWrites := []vk.WriteDescriptorSet{

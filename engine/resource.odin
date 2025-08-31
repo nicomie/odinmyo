@@ -106,7 +106,7 @@ generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image,
 
     mipW := w
     mipH := h
-    for i in 1..<mipLevels {
+    for i in 1..<texture.mips {
         barrier.subresourceRange.baseMipLevel = i - 1
         barrier.oldLayout = .TRANSFER_DST_OPTIMAL
         barrier.newLayout = .TRANSFER_SRC_OPTIMAL
@@ -151,7 +151,7 @@ generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image,
         if mipH> 1 do mipH /=2
     }
 
-    barrier.subresourceRange.baseMipLevel = mipLevels -1
+    barrier.subresourceRange.baseMipLevel = texture.mips -1
     barrier.oldLayout = .TRANSFER_DST_OPTIMAL
     barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
     barrier.srcAccessMask = {.TRANSFER_WRITE}
@@ -176,6 +176,8 @@ createShaderModule :: proc(data: []u8, device: vk.Device) -> vk.ShaderModule {
 }
 
 createSurface :: proc(using ctx: ^Context) {
+    using ctx.platform
+    using ctx.vulkan
     if sdl.Vulkan_CreateSurface(window, instance, &surface) != true {
         fmt.println("failed to create window surface")
         return 

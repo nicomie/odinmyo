@@ -122,6 +122,7 @@ createCommandBuffers :: proc(using ctx: ^Context) {
 }
 
 recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
+    using ctx.platform
     beginInfo := vk.CommandBufferBeginInfo{
         sType = .COMMAND_BUFFER_BEGIN_INFO,
         flags = {.ONE_TIME_SUBMIT}
@@ -291,5 +292,5 @@ copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
     region.imageOffset = {0,0,0}
     region.imageExtent = {w,h,1}
 
-    vk.CmdCopyBufferToImage(cmdBuffer, buffer, texture.texture, .TRANSFER_DST_OPTIMAL, 1, &region)
+    vk.CmdCopyBufferToImage(cmdBuffer, buffer, texture.handle.texture, .TRANSFER_DST_OPTIMAL, 1, &region)
 }

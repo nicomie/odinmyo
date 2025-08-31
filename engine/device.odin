@@ -14,6 +14,7 @@ hasStencilComponent :: proc(format: vk.Format) -> bool{
 }
 
 pickPhysicalDevice :: proc(using ctx: ^Context) {
+    using ctx.vulkan
     deviceCount: u32 = 0
     result := vk.EnumeratePhysicalDevices(instance, &deviceCount, nil);
     if result != .SUCCESS {
