@@ -47,6 +47,12 @@ VulkanContext :: struct {
 
 SwapchainContext :: struct {
     swapchain: Swapchain,
+    renderPass: vk.RenderPass,
+
+    depthImage: DepthImage,
+    colorImage: DepthImage,
+   
+    msaa: vk.SampleCountFlags,
 }
 
 Context :: struct {
@@ -56,7 +62,7 @@ Context :: struct {
     sc: SwapchainContext,
     
     debugMessenger: vk.DebugUtilsMessengerEXT,
-    renderPass: vk.RenderPass,
+   
     
     surface: vk.SurfaceKHR,
     presentQueue: vk.Queue,
@@ -81,10 +87,7 @@ Context :: struct {
 
     texture: Texture,
     
-    depthImage: DepthImage,
-    colorImage: DepthImage,
-   
-    msaa: vk.SampleCountFlags,
+    
     camera: Camera,
     ray: Ray,
     meshes: [dynamic]MeshObject,
@@ -187,6 +190,7 @@ initVulkan :: proc(using ctx: ^Context) {
 exit :: proc(using ctx: ^Context) {
     using ctx.platform
     using ctx.vulkan
+    using ctx.sc
     cleanSwapchain(ctx)
 
     vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)
