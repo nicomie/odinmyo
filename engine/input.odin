@@ -6,6 +6,7 @@ import "core:os"
 
 handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
     using ctx.platform
+    using ctx.vulkan
     clickPending = true
     clickX = x
     clickY = y

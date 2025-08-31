@@ -41,6 +41,8 @@ VulkanContext :: struct {
     instance: vk.Instance,
     device: vk.Device,
     physicalDevice: vk.PhysicalDevice,
+    queueIndices: [QueueFamily]int,
+    graphicsQueue: vk.Queue,
 }
 
 Context :: struct {
@@ -51,8 +53,6 @@ Context :: struct {
     debugMessenger: vk.DebugUtilsMessengerEXT,
     
     
-    queueIndices: [QueueFamily]int,
-    graphicsQueue: vk.Queue,
     surface: vk.SurfaceKHR,
     presentQueue: vk.Queue,
     swapchain: Swapchain,
@@ -329,5 +329,6 @@ main :: proc() {
 }
 
 initContext :: proc(using ctx: ^Context) {
+   using ctx.vulkan
    for &q in queueIndices do q = -1
 }
