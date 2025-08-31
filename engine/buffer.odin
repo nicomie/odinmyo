@@ -108,6 +108,7 @@ createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) -> Buffer{
 
 createCommandBuffers :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.frame
     allocInfo: vk.CommandBufferAllocateInfo
     allocInfo.sType = .COMMAND_BUFFER_ALLOCATE_INFO
     allocInfo.commandPool = commandPool 

@@ -56,24 +56,26 @@ SwapchainContext :: struct {
     msaa: vk.SampleCountFlags,
 }
 
+FrameContext :: struct {
+    commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+
+    imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+    renderFinishedSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+    inFlightFences: [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+}
+
 Context :: struct {
     pipelines: map[string]vk.Pipeline, 
     platform: PlatformContext,
     vulkan: VulkanContext,
     sc: SwapchainContext,
-    
-    
-   
-    
-    
+    frame: FrameContext,
     
     meshPipelineLayout: vk.PipelineLayout,
     commandPool: vk.CommandPool,
-    commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+    
     idCommandBuffer: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-    imageAvailableSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-    renderFinishedSemaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-    inFlightFences: [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+    
     currentFrame :u32,
     framebufferResized :bool,
 
@@ -191,6 +193,7 @@ exit :: proc(using ctx: ^Context) {
     using ctx.platform
     using ctx.vulkan
     using ctx.sc
+    using ctx.frame
     cleanSwapchain(ctx)
 
     vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)

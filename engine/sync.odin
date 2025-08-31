@@ -6,6 +6,7 @@ import "core:os"
 
 createSyncObjects :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.frame
     semaphoreInfo: vk.SemaphoreCreateInfo
     semaphoreInfo.sType = .SEMAPHORE_CREATE_INFO
 
