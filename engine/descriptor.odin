@@ -147,6 +147,7 @@ createIdDescriptorSets :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.pipe
     using ctx.resource
+    using ctx.id
     idLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         idLayouts[i] = descriptorSetLayouts["id"]

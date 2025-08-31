@@ -24,6 +24,7 @@ handleMouseClick :: proc(using ctx: ^Context, x, y: i32) {
 processClick :: proc(using ctx: ^Context) {
     using ctx.platform
     using ctx.vulkan
+    using ctx.id
     // Only copy the clicked pixel
     cmdBuffer := beginCommand(ctx)
     

@@ -32,6 +32,7 @@ createFramebuffer :: proc(using ctx: ^Context) {
 createObjectIdFramebuffer :: proc (using ctx: ^Context) {
     using ctx.vulkan
     using ctx.sc
+    using ctx.id
     attachments := []vk.ImageView{idImage.view, depthImage.view}
 
     framebufferInfo: vk.FramebufferCreateInfo

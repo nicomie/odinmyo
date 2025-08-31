@@ -131,6 +131,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
     using ctx.sc
     using ctx.pipe
     using ctx.resource
+    using ctx.id
     beginInfo := vk.CommandBufferBeginInfo{
         sType = .COMMAND_BUFFER_BEGIN_INFO,
         flags = {.ONE_TIME_SUBMIT}

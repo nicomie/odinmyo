@@ -8,6 +8,7 @@ import "core:os"
 createPipelineLayouts :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.pipe
+    using ctx.id
     pRanges := vk.PushConstantRange{
         stageFlags = {.VERTEX},
         offset = 0,
@@ -195,6 +196,7 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
 createIdPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     using ctx.vulkan
     using ctx.sc
+    using ctx.id
     // Load ID shader modules
     vertShaderCode, _:= os.read_entire_file_from_filename("shaders/id-vert.spv") 
     fragShaderCode, _ := os.read_entire_file_from_filename("shaders/id-frag.spv")

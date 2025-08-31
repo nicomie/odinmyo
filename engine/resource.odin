@@ -18,6 +18,7 @@ createColorResources :: proc(using ctx: ^Context) {
 createDepthResource ::proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.sc
+    using ctx.id
     depthFormat := findDepthFormat(physicalDevice)
     createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, {._1}, depthFormat, 
     .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
@@ -26,6 +27,7 @@ createDepthResource ::proc(using ctx: ^Context) {
 
 createIdResource :: proc(using ctx: ^Context) {
     using ctx.sc
+    using ctx.id
     createImage(
         ctx,
         swapchain.extent.width,

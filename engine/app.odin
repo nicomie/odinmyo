@@ -70,8 +70,17 @@ PipelineContext :: struct {
     meshPipelineLayout: vk.PipelineLayout,
     descriptorPool: vk.DescriptorPool,
     descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
-    idDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
     descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+IdPipelineContext :: struct {
+    idStagingBuffer: Buffer,
+    idStagingBufferMemory: vk.DeviceMemory,
+    idPipelineLayout: vk.PipelineLayout,
+    idDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+    idImage: DepthImage,
+    idRenderPass: vk.RenderPass,
+    idFramebuffer: vk.Framebuffer,
 }
 
 ResourceContext :: struct {
@@ -89,6 +98,7 @@ Context :: struct {
     frame: FrameContext,
     pipe: PipelineContext,
     resource: ResourceContext,
+    id: IdPipelineContext,
     
     commandPool: vk.CommandPool,
 
@@ -98,13 +108,8 @@ Context :: struct {
     camera: Camera,
     ray: Ray,
     
-    idStagingBuffer: Buffer,
-    idStagingBufferMemory: vk.DeviceMemory,
-    idPipelineLayout: vk.PipelineLayout,
-    idImage: DepthImage,
-    idRenderPass: vk.RenderPass,
     toggleHover: bool,
-    idFramebuffer: vk.Framebuffer,
+    
 }
 
 
@@ -123,6 +128,7 @@ Vertex :: struct{
 initVulkan :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.sc
+    using ctx.id
     getInstanceProcAddr := sdl.Vulkan_GetVkGetInstanceProcAddr()
     assert(getInstanceProcAddr != nil)
     vk.load_proc_addresses(getInstanceProcAddr)
@@ -200,6 +206,7 @@ exit :: proc(using ctx: ^Context) {
     using ctx.frame
     using ctx.pipe
     using ctx.resource
+    using ctx.id
     cleanSwapchain(ctx)
 
     vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)

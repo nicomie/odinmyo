@@ -121,6 +121,7 @@ createTextureImageView :: proc(using ctx: ^Context) {
 
 
 createIdImageView :: proc(using ctx: ^Context) {    
+    using ctx.id
     idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, 1, "id")
 }
 
