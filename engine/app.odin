@@ -43,15 +43,16 @@ VulkanContext :: struct {
     physicalDevice: vk.PhysicalDevice,
     queueIndices: [QueueFamily]int,
     graphicsQueue: vk.Queue,
+    surface: vk.SurfaceKHR,
+    debugMessenger: vk.DebugUtilsMessengerEXT,
+    presentQueue: vk.Queue,
 }
 
 SwapchainContext :: struct {
     swapchain: Swapchain,
     renderPass: vk.RenderPass,
-
     depthImage: DepthImage,
     colorImage: DepthImage,
-   
     msaa: vk.SampleCountFlags,
 }
 
@@ -61,11 +62,10 @@ Context :: struct {
     vulkan: VulkanContext,
     sc: SwapchainContext,
     
-    debugMessenger: vk.DebugUtilsMessengerEXT,
+    
    
     
-    surface: vk.SurfaceKHR,
-    presentQueue: vk.Queue,
+    
     
     meshPipelineLayout: vk.PipelineLayout,
     commandPool: vk.CommandPool,

@@ -26,6 +26,7 @@ Swapchain :: struct {
 }
 
 querySwapChainSupport :: proc(target: vk.PhysicalDevice, using ctx: ^Context) -> SwapChainSupportDetails{
+    using ctx.vulkan
     details: SwapChainSupportDetails
     
     vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(target, surface, &details.capabilities)
