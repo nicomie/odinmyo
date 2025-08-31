@@ -40,6 +40,7 @@ PlatformContext :: struct {
 VulkanContext :: struct {
     instance: vk.Instance,
     device: vk.Device,
+    physicalDevice: vk.PhysicalDevice,
 }
 
 Context :: struct {
@@ -48,7 +49,7 @@ Context :: struct {
     vulkan: VulkanContext,
     
     debugMessenger: vk.DebugUtilsMessengerEXT,
-    physicalDevice: vk.PhysicalDevice,
+    
     
     queueIndices: [QueueFamily]int,
     graphicsQueue: vk.Queue,

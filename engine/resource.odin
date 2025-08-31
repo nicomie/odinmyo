@@ -15,6 +15,7 @@ createColorResources :: proc(using ctx: ^Context) {
 }
 
 createDepthResource ::proc(using ctx: ^Context) {
+    using ctx.vulkan
     depthFormat := findDepthFormat(physicalDevice)
     createImage(ctx, swapchain.extent.width, swapchain.extent.height, 1, {._1}, depthFormat, 
     .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &depthImage.image)
@@ -79,7 +80,7 @@ createIdResource :: proc(using ctx: ^Context) {
 }   
 
 generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image, w,h: i32) {
-
+    using ctx.vulkan
     formatProperties : vk.FormatProperties
     vk.GetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties)
 
