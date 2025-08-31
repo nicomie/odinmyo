@@ -224,7 +224,7 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     renderPassInfo: vk.RenderPassBeginInfo 
     renderPassInfo.sType = .RENDER_PASS_BEGIN_INFO
     renderPassInfo.renderPass = renderPass
-    renderPassInfo.framebuffer = swapchain.framebuffers[imageIndex]
+    renderPassInfo.framebuffer = swapchain.attachments.framebuffers[imageIndex]
     renderPassInfo.renderArea.offset = {0, 0}
     renderPassInfo.renderArea.extent = swapchain.extent
 

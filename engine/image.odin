@@ -20,10 +20,10 @@ Image :: struct {
 
 createImageViews :: proc(using ctx: ^Context) {
     using ctx.sc
-    swapchain.imageViews = make([]vk.ImageView, len(swapchain.images))
+    swapchain.attachments.views = make([]vk.ImageView, len(swapchain.images))
 
     for _, i in swapchain.images {
-        swapchain.imageViews[i] = createImageView(ctx, swapchain.images[i], swapchain.format, {.COLOR}, 1, "swapchain")
+        swapchain.attachments.views[i] = createImageView(ctx, swapchain.images[i], swapchain.format, {.COLOR}, 1, "swapchain")
     }
 
 }

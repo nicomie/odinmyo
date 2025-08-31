@@ -11,14 +11,18 @@ SwapChainSupportDetails :: struct {
     presentModes: []vk.PresentModeKHR,
 }
 
+SwapchainAttachments :: struct {
+    views: []vk.ImageView,
+    framebuffers: []vk.Framebuffer,
+}
+
 Swapchain :: struct {
     handle: vk.SwapchainKHR,
     imageCount: u32,
     images: []vk.Image,
     format: vk.Format,
     extent: vk.Extent2D,
-    imageViews: []vk.ImageView,
-    framebuffers: []vk.Framebuffer,
+    attachments: SwapchainAttachments,
 }
 
 querySwapChainSupport :: proc(target: vk.PhysicalDevice, using ctx: ^Context) -> SwapChainSupportDetails{
@@ -177,8 +181,8 @@ cleanSwapchain :: proc(using ctx: ^Context) {
     vk.FreeMemory(device, depthImage.image.memory, nil)
 
 
-    for fb in swapchain.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
-    for view in swapchain.imageViews do vk.DestroyImageView(device, view, nil)
+    for fb in swapchain.attachments.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
+    for view in swapchain.attachments.views do vk.DestroyImageView(device, view, nil)
     vk.DestroySwapchainKHR(device, swapchain.handle, nil)
 
 }

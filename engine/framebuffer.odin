@@ -7,10 +7,10 @@ import "core:os"
 createFramebuffer :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.sc
-    swapchain.framebuffers = make([]vk.Framebuffer, len(swapchain.imageViews))
+    swapchain.attachments.framebuffers = make([]vk.Framebuffer, len(swapchain.attachments.views))
 
-    for i in 0..<len(swapchain.imageViews) {
-        attachments := []vk.ImageView{swapchain.imageViews[i], depthImage.view }
+    for i in 0..<len(swapchain.attachments.views) {
+        attachments := []vk.ImageView{swapchain.attachments.views[i], depthImage.view }
  
         framebufferInfo: vk.FramebufferCreateInfo
         framebufferInfo.sType = .FRAMEBUFFER_CREATE_INFO
@@ -22,7 +22,7 @@ createFramebuffer :: proc(using ctx: ^Context) {
         framebufferInfo.layers = 1
 
 
-        if vk.CreateFramebuffer(device, &framebufferInfo, nil, &swapchain.framebuffers[i]) != .SUCCESS{
+        if vk.CreateFramebuffer(device, &framebufferInfo, nil, &swapchain.attachments.framebuffers[i]) != .SUCCESS{
             fmt.eprintf("Failed to create fram buffer for index %d \n", i)
             os.exit(1)
         }
