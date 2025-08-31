@@ -24,21 +24,22 @@ Camera :: struct {
 }
 
 initCamera :: proc(using ctx: ^Context) {
+    using ctx.sc
     camera.target = linalg.Vector3f32{0, 0, 0}
-    camera.distance = 5.0  // Start with a more reasonable distance
+    camera.distance = 5.0 
     camera.yaw = 0.0
     camera.pitch = 0.0
     
     updateCameraPosition(ctx)
 
-    aspect_ratio := f32(ctx.swapchain.extent.width) / f32(ctx.swapchain.extent.height)
+    aspect_ratio := f32(swapchain.extent.width) / f32(swapchain.extent.height)
     camera.projection = linalg.matrix4_perspective(
         math.to_radians_f32(60.0), 
         aspect_ratio,
         0.1,                     
         100.0,                   
         true)
-    camera.projection[1][1] *= -1  // Flip Y-axis for Vulkan
+    camera.projection[1][1] *= -1  
 }
 
 updateCameraPosition :: proc(using ctx: ^Context) {

@@ -127,6 +127,7 @@ createCommandBuffers :: proc(using ctx: ^Context) {
 
 recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
     using ctx.platform
+    using ctx.sc
     beginInfo := vk.CommandBufferBeginInfo{
         sType = .COMMAND_BUFFER_BEGIN_INFO,
         flags = {.ONE_TIME_SUBMIT}
@@ -213,6 +214,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
 }
 
 recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
+    using ctx.sc
     beginInfo: vk.CommandBufferBeginInfo
     beginInfo.sType = .COMMAND_BUFFER_BEGIN_INFO
     beginInfo.pInheritanceInfo = nil

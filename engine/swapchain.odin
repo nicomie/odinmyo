@@ -93,6 +93,7 @@ clamp :: proc(value, min, max: u32) -> u32  {
 
 createSwapchain :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.sc
     swapChainSupport := querySwapChainSupport(physicalDevice, ctx)
 
     surfaceFormat := chooseSwapSurfaceFormat(&swapChainSupport.formats)
@@ -166,6 +167,7 @@ recreateSwapchain :: proc(using ctx: ^Context) {
 
 cleanSwapchain :: proc(using ctx: ^Context) {   
     using ctx.vulkan
+    using ctx.sc
     vk.DestroyImageView(device, colorImage.view, nil)
     vk.DestroyImage(device, colorImage.image.texture, nil)
     vk.FreeMemory(device, colorImage.image.memory, nil)

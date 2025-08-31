@@ -45,18 +45,22 @@ VulkanContext :: struct {
     graphicsQueue: vk.Queue,
 }
 
+SwapchainContext :: struct {
+    swapchain: Swapchain,
+}
+
 Context :: struct {
     pipelines: map[string]vk.Pipeline, 
     platform: PlatformContext,
     vulkan: VulkanContext,
+    sc: SwapchainContext,
     
     debugMessenger: vk.DebugUtilsMessengerEXT,
-    
+    renderPass: vk.RenderPass,
     
     surface: vk.SurfaceKHR,
     presentQueue: vk.Queue,
-    swapchain: Swapchain,
-    renderPass: vk.RenderPass,
+    
     meshPipelineLayout: vk.PipelineLayout,
     commandPool: vk.CommandPool,
     commandBuffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -109,6 +113,7 @@ Vertex :: struct{
 
 initVulkan :: proc(using ctx: ^Context) {
     using ctx.vulkan
+    using ctx.sc
     getInstanceProcAddr := sdl.Vulkan_GetVkGetInstanceProcAddr()
     assert(getInstanceProcAddr != nil)
     vk.load_proc_addresses(getInstanceProcAddr)

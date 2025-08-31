@@ -52,7 +52,7 @@ createPipelines :: proc(using ctx: ^Context) {
 
 createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     using ctx.vulkan
-
+    using ctx.sc
     vertShaderCode, _:= os.read_entire_file_from_filename("shaders/vert.spv")
     fragShaderCode, _:= os.read_entire_file_from_filename("shaders/frag.spv")
     defer delete(vertShaderCode)
@@ -191,6 +191,7 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
 
 createIdPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     using ctx.vulkan
+    using ctx.sc
     // Load ID shader modules
     vertShaderCode, _:= os.read_entire_file_from_filename("shaders/id-vert.spv") 
     fragShaderCode, _ := os.read_entire_file_from_filename("shaders/id-frag.spv")
