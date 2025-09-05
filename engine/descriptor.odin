@@ -99,7 +99,6 @@ createDescriptorSets :: proc(using ctx: ^Context) {
         pSetLayouts = &meshLayouts[0],
     }
 
-    meshDescriptorSets := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
     if vk.AllocateDescriptorSets(device, &meshAllocInfo, &descriptorSets[0]) != .SUCCESS {
         fmt.eprintln("failed to allocate mesh descriptor sets")
         os.exit(1)
@@ -114,8 +113,8 @@ createDescriptorSets :: proc(using ctx: ^Context) {
 
         imageInfo := vk.DescriptorImageInfo{
             imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-            imageView = texture.view,
-            sampler = texture.sampler,
+            imageView = textures[0].view,
+            sampler = textures[0].sampler,
         }
 
         meshDescriptorWrites := []vk.WriteDescriptorSet{

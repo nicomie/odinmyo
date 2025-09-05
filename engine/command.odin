@@ -6,6 +6,7 @@ import "core:os"
 
 beginCommand :: proc(using ctx:^Context) -> vk.CommandBuffer{
     using ctx.vulkan
+    fmt.println("Beginning command buffer...")
     allocInfo := vk.CommandBufferAllocateInfo{
         sType = .COMMAND_BUFFER_ALLOCATE_INFO,
         level = .PRIMARY,
@@ -28,7 +29,7 @@ beginCommand :: proc(using ctx:^Context) -> vk.CommandBuffer{
 endCommand :: proc(using ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
     using ctx.vulkan
     vk.EndCommandBuffer(cmdBuffer^)
-
+    fmt.println("Ending command buffer...")
     submitInfo := vk.SubmitInfo{
         sType = .SUBMIT_INFO,
         commandBufferCount = 1,

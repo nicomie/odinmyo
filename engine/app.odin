@@ -88,7 +88,7 @@ IdPipelineContext :: struct {
 ResourceContext :: struct {
     uniformBuffers: []Buffer,
     uniformBuffersMapped: []rawptr,
-    texture: Texture,
+    textures: []Texture,
     meshes: [dynamic]MeshObject,
 }
 
@@ -111,7 +111,6 @@ Context :: struct {
     currentFrame :u32,
     framebufferResized :bool,  
 }
-
 
 Ray :: struct {
     origin: linalg.Vector4f32,
@@ -166,7 +165,7 @@ initVulkan :: proc(using ctx: ^Context) {
     createCommandPool(ctx)
 
     createPipelines(ctx)
-    setupGlb(ctx)
+    setupGlb(ctx, "glbs/SciFiHelmet/glTF/SciFiHelmet.gltf")
 
     createColorResources(ctx)
     createDepthResource(ctx)
@@ -217,11 +216,11 @@ exit :: proc(using ctx: ^Context) {
     
     vk.DestroyFramebuffer(device, idFramebuffer, nil)
 
-    vk.DestroySampler(device, texture.sampler, nil)
+    vk.DestroySampler(device, textures[0].sampler, nil)
     
-    vk.DestroyImageView(device, texture.view, nil)
-    vk.DestroyImage(device, texture.handle.texture, nil)
-    vk.FreeMemory(device, texture.handle.memory, nil)
+    vk.DestroyImageView(device, textures[0].view, nil)
+    vk.DestroyImage(device, textures[0].handle.texture, nil)
+    vk.FreeMemory(device, textures[0].handle.memory, nil)
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         vk.DestroyBuffer(device, uniformBuffers[i].buffer, nil)

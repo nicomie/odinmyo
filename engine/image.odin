@@ -116,7 +116,7 @@ usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
 
 createTextureImageView :: proc(using ctx: ^Context) {    
     using ctx.resource
-    texture.view = createImageView(ctx, texture.handle.texture, .R8G8B8A8_SRGB, {.COLOR}, texture.mips, "texture")
+    textures[0].view = createImageView(ctx, textures[0].handle.texture, .R8G8B8A8_SRGB, {.COLOR}, textures[0].mips, "texture")
 }
 
 
@@ -129,9 +129,9 @@ createTextureImage :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.resource
 
-    f := libc.fopen(texture.uri, "rb")
+    f := libc.fopen(textures[0].uri, "rb")
     if f == nil {
-        fmt.eprintf("failed to fopen file \n", texture.uri)
+        fmt.eprintf("failed to fopen file \n", textures[0].uri)
         os.exit(1)
     }
     defer libc.fclose(f)
@@ -141,7 +141,7 @@ createTextureImage :: proc(using ctx: ^Context) {
     loadedImage := image.load_from_file(f, &w, &h, &channels, 4); defer image.image_free(loadedImage)
 
     max :=  w > h ? h : w
-    texture.mips = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
+    textures[0].mips = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
 
     if loadedImage == nil {
         fmt.eprintln("failed to load image via load_from_file")
@@ -159,18 +159,18 @@ createTextureImage :: proc(using ctx: ^Context) {
     mem.copy(data, loadedImage, cast(int)imageSize)
     vk.UnmapMemory(device, stagingBuffer.memory)
  
-    createImage(ctx, w32, h32, texture.mips, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture.handle)
-    transitionImageLayout(ctx, texture.handle.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, texture.mips)
+    createImage(ctx, w32, h32, textures[0].mips, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &textures[0].handle)
+    transitionImageLayout(ctx, textures[0].handle.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, textures[0].mips)
     copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32)
 
     vk.DestroyBuffer(device, stagingBuffer.buffer, nil)
     vk.FreeMemory(device, stagingBuffer.memory, nil)
 
-    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.handle.texture, w, h)
+    generateMipmaps(ctx, .R8G8B8A8_SRGB, textures[0].handle.texture, w, h)
 
 }
 
-createTextureSampler ::proc(using ctx:^Context) {
+createTextureSampler ::proc(using ctx:^Context) -> vk.Sampler{
     using ctx.vulkan
     using ctx.resource
 
@@ -192,14 +192,17 @@ createTextureSampler ::proc(using ctx:^Context) {
         compareOp = .ALWAYS,
         mipmapMode = .LINEAR,
         minLod =  0.0,
-        maxLod = f32(texture.mips),
+        maxLod = f32(textures[0].mips),
         mipLodBias = 0.0,
     }
 
-    if vk.CreateSampler(device, &samplerInfo, nil, &texture.sampler) != .SUCCESS {
+    sampler: vk.Sampler
+    if vk.CreateSampler(device, &samplerInfo, nil, &sampler) != .SUCCESS {
         fmt.eprintln("failed to CreateSampler")
         os.exit(1)
     }
+
+    return sampler
 }
 
 transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout, mips: u32) {

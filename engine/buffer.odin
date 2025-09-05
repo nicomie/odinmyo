@@ -83,7 +83,7 @@ createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) -> Buffer {
     return buffer
 }
 
-createIndexBuffer :: proc(using ctx: ^Context, indices: []u16) -> Buffer{
+createIndexBuffer :: proc(using ctx: ^Context, indices: []u32) -> Buffer{
     using ctx.vulkan
     buffer: Buffer
     buffer.length = len(indices)
@@ -208,7 +208,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
         )
 
         vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT16)
+        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT32)
         vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
     }
 
@@ -281,7 +281,7 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
         )
 
         vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT16)
+        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT32)
         vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
     }
 
@@ -306,5 +306,5 @@ copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
     region.imageOffset = {0,0,0}
     region.imageExtent = {w,h,1}
 
-    vk.CmdCopyBufferToImage(cmdBuffer, buffer, texture.handle.texture, .TRANSFER_DST_OPTIMAL, 1, &region)
+    vk.CmdCopyBufferToImage(cmdBuffer, buffer, textures[0].handle.texture, .TRANSFER_DST_OPTIMAL, 1, &region)
 }
