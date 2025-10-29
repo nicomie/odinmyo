@@ -22,10 +22,11 @@ createUniformBuffers :: proc(using ctx: ^Context) {
     uniformBuffersMapped = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        createBuffer(ctx, bufferSize, {.UNIFORM_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, &uniformBuffers[i])
+        createBuffer(ctx, bufferSize, {.UNIFORM_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, 
+            &uniformBuffers[i], fmt.tprintf("ubo%d", i))
         vk.MapMemory(device, uniformBuffers[i].memory, 0, bufferSize, {}, &uniformBuffersMapped[i])
     }
-}
+}   
 
 updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     using ctx.platform
@@ -36,7 +37,7 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     model := linalg.matrix4_rotate(angle, axis)
     
     for &mesh in meshes {
-        mesh.transform = linalg.MATRIX4F32_IDENTITY
+        //mesh.transform = linalg.MATRIX4F32_IDENTITY
     }
     
     ubo: UBO

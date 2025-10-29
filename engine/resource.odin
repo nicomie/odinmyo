@@ -83,7 +83,7 @@ createIdResource :: proc(using ctx: ^Context) {
     endCommand(ctx, &cmdBuffer)
 }   
 
-generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image, w,h: i32) {
+generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image, w,h: i32, texture: ^Texture) {
     using ctx.vulkan
     using ctx.resource
     formatProperties : vk.FormatProperties
@@ -112,7 +112,7 @@ generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image,
 
     mipW := w
     mipH := h
-    for i in 1..<textures[0].mips {
+    for i in 1..<texture.mips {
         barrier.subresourceRange.baseMipLevel = i - 1
         barrier.oldLayout = .TRANSFER_DST_OPTIMAL
         barrier.newLayout = .TRANSFER_SRC_OPTIMAL
@@ -157,7 +157,7 @@ generateMipmaps :: proc(using ctx: ^Context, format: vk.Format, image: vk.Image,
         if mipH> 1 do mipH /=2
     }
 
-    barrier.subresourceRange.baseMipLevel = textures[0].mips -1
+    barrier.subresourceRange.baseMipLevel = texture.mips -1
     barrier.oldLayout = .TRANSFER_DST_OPTIMAL
     barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
     barrier.srcAccessMask = {.TRANSFER_WRITE}

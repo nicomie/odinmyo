@@ -6,7 +6,7 @@ import "core:os"
 import "core:mem"
 import "core:math"
 import "vendor:stb/image"
-import "core:c/libc"
+import "core:strings"
 
 DepthImage :: struct{
     image: Image,
@@ -116,6 +116,8 @@ usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
 
 createTextureImageView :: proc(using ctx: ^Context) {    
     using ctx.resource
+    using ctx.vulkan
+    vk.DestroyImageView(device, textures[0].view, nil)
     textures[0].view = createImageView(ctx, textures[0].handle.texture, .R8G8B8A8_SRGB, {.COLOR}, textures[0].mips, "texture")
 }
 
@@ -125,52 +127,51 @@ createIdImageView :: proc(using ctx: ^Context) {
     idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, 1, "id")
 }
 
-createTextureImage :: proc(using ctx: ^Context) {
+createTextureImage :: proc(using ctx: ^Context, texture: ^Texture,
+path: string, textureIndex: int){
     using ctx.vulkan
     using ctx.resource
 
-    f := libc.fopen(textures[0].uri, "rb")
-    if f == nil {
-        fmt.eprintf("failed to fopen file \n", textures[0].uri)
-        os.exit(1)
+    fmt.printf("Creating texture %d: %s\n", textureIndex, path)
+    
+    if !os.exists(path) {
+        fmt.eprintf("Texture file does not exist: %s\n", path)
     }
-    defer libc.fclose(f)
 
     w, h, channels: i32 
-    
-    loadedImage := image.load_from_file(f, &w, &h, &channels, 4); defer image.image_free(loadedImage)
+
+    imageData := image.load(strings.clone_to_cstring(path), &w, &h, &channels, 4)
+    defer image.image_free(imageData)
+
+    if imageData == nil {
+        fmt.eprintf("Failed to load texture: %s\n", path)
+    }
 
     max :=  w > h ? h : w
-    textures[0].mips = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
-
-    if loadedImage == nil {
-        fmt.eprintln("failed to load image via load_from_file")
-        os.exit(1)
-    }
+    texture.mips = cast(u32)math.floor_f32(math.log2(cast(f32)max)) + 1
+    fmt.println("Creating Vulkan image...")
     w32 := cast(u32)w
     h32 := cast(u32)h
 
     imageSize := cast(vk.DeviceSize)(w32 * h32 * 4)
     stagingBuffer : Buffer 
-    createBuffer(ctx, imageSize, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &stagingBuffer)
+    createBuffer(ctx, imageSize, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &stagingBuffer,
+    "imageStaging")
 
     data: rawptr
     vk.MapMemory(device, stagingBuffer.memory, 0, imageSize, {}, &data)
-    mem.copy(data, loadedImage, cast(int)imageSize)
+    mem.copy(data, imageData, cast(int)imageSize)
     vk.UnmapMemory(device, stagingBuffer.memory)
  
-    createImage(ctx, w32, h32, textures[0].mips, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &textures[0].handle)
-    transitionImageLayout(ctx, textures[0].handle.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, textures[0].mips)
-    copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32)
+    createImage(ctx, w32, h32, texture.mips, {._1}, .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture.handle)
+    transitionImageLayout(ctx, texture.handle.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, texture.mips)
+    copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32, texture)
 
-    vk.DestroyBuffer(device, stagingBuffer.buffer, nil)
-    vk.FreeMemory(device, stagingBuffer.memory, nil)
-
-    generateMipmaps(ctx, .R8G8B8A8_SRGB, textures[0].handle.texture, w, h)
-
+    destroyBuffer("imageStaging", ctx.vulkan.device, stagingBuffer)
+    generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.handle.texture, w, h, texture)
 }
 
-createTextureSampler ::proc(using ctx:^Context) -> vk.Sampler{
+createTextureSampler ::proc(using ctx:^Context, texture: ^Texture, path: string, textureIndex: int) -> vk.Sampler{
     using ctx.vulkan
     using ctx.resource
 
@@ -192,13 +193,17 @@ createTextureSampler ::proc(using ctx:^Context) -> vk.Sampler{
         compareOp = .ALWAYS,
         mipmapMode = .LINEAR,
         minLod =  0.0,
-        maxLod = f32(textures[0].mips),
+        maxLod = f32(texture.mips),
         mipLodBias = 0.0,
     }
 
     sampler: vk.Sampler
     if vk.CreateSampler(device, &samplerInfo, nil, &sampler) != .SUCCESS {
-        fmt.eprintln("failed to CreateSampler")
+
+        fmt.eprintf("Failed to create sampler for texture: %s\n", path)
+        vk.DestroyImageView(device, texture.view, nil)
+        vk.DestroyImage(device, texture.handle.texture, nil)
+        vk.FreeMemory(device, texture.handle.memory, nil)
         os.exit(1)
     }
 

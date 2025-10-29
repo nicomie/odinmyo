@@ -2,16 +2,12 @@ package engine
 
 import vk "vendor:vulkan"
 import "core:fmt"
-import "core:os"
-import "core:mem"
-import "core:c/libc"
+
 import "vendor:stb/image"
 import "vendor:cgltf"
 
 import "core:math/linalg"
-import "core:math"
 
-import "core:strings"
 
 Primitive :: struct {
     firstIndex: u32,
@@ -33,15 +29,15 @@ Material :: struct {
 }
 
 MeshObject :: struct {
-    vertexBuffer: Buffer, 
-    indexBuffer: Buffer,
+    vertexBuffer: ^Buffer, 
+    indexBuffer: ^Buffer,
     transform: linalg.Matrix4x4f32,
     material: ^cgltf.material,
 }
 
 loadTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
     using ctx.resource
-    textures = make([]Texture, len(data.images))
+    textures = make([]^Texture, len(data.images))
     for i in 0..<len(data.images) {
         image := data.images[i]
         
@@ -53,217 +49,14 @@ loadTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
     }
 }
 
-createTextureFromFile :: proc(using ctx: ^Context, path: string, textureIndex: int) -> Texture {
+createTextureFromFile :: proc(using ctx: ^Context, path: string, textureIndex: int) -> ^Texture {
     using ctx.vulkan
-    texture: Texture
-    texture.uri = strings.clone_to_cstring(path)
-    
-    fmt.printf("Creating texture %d: %s\n", textureIndex, path)
-    
-    // Check if file exists first
-    if !os.exists(path) {
-        fmt.eprintf("Texture file does not exist: %s\n", path)
-        return texture
-    }
-    
-    // Load image data
-    width, height: i32
-    channels: i32
-    imageData := image.load(strings.clone_to_cstring(path), &width, &height, &channels, 4)
-    defer image.image_free(imageData)
-    
-    if imageData == nil {
-        fmt.eprintf("Failed to load texture: %s\n", path)
-        return texture
-    }
-    
-    fmt.printf("Loaded texture: %dx%d, %d channels\n", width, height, channels)
-    
-    fmt.println("Creating Vulkan image...")
-    imageCreateInfo := vk.ImageCreateInfo{
-        sType = .IMAGE_CREATE_INFO,
-        imageType = .D2,
-        extent = {
-            width = u32(width),
-            height = u32(height),
-            depth = 1,
-        },
-        mipLevels = 1,
-        arrayLayers = 1,
-        format = .R8G8B8A8_SRGB,
-        tiling = .OPTIMAL,
-        initialLayout = .UNDEFINED,
-        usage = {.TRANSFER_DST, .SAMPLED},
-        sharingMode = .EXCLUSIVE,
-        samples = {._1},
-    }
-    
-    if vk.CreateImage(device, &imageCreateInfo, nil, &texture.handle.texture) != .SUCCESS {
-        fmt.eprintf("Failed to create image for texture: %s\n", path)
-        return texture
-    }
-    
-    fmt.println("Allocating image memory...")
-    memRequirements: vk.MemoryRequirements
-    vk.GetImageMemoryRequirements(device, texture.handle.texture, &memRequirements)
-    
-    allocInfo := vk.MemoryAllocateInfo{
-        sType = .MEMORY_ALLOCATE_INFO,
-        allocationSize = memRequirements.size,
-        memoryTypeIndex = findMemType(
-            physicalDevice,
-            memRequirements.memoryTypeBits,
-            {.DEVICE_LOCAL}
-        ),
-    }
-    
-    if vk.AllocateMemory(device, &allocInfo, nil, &texture.handle.memory) != .SUCCESS {
-        fmt.eprintf("Failed to allocate image memory for texture: %s\n", path)
-        vk.DestroyImage(device, texture.handle.texture, nil)
-        return texture
-    }
-    fmt.println("Image memory allocated successfully")
+    texture := new(Texture)
+    createTextureImage(ctx, texture, path, textureIndex)
+    texture.view = createImageView(ctx, texture.handle.texture, .R8G8B8A8_SRGB, {.COLOR}, texture.mips, "texture")
+    texture.sampler = createTextureSampler(ctx, texture, path, textureIndex)
+      fmt.println("here")
 
-    vk.BindImageMemory(device, texture.handle.texture, texture.handle.memory, 0)
-    fmt.println("Image memory bound successfully")
-
-    fmt.println("Creating staging buffer...")
-    imageSize := vk.DeviceSize(width * height * 4)
-    stagingBuffer: Buffer
-    
-    createBuffer(
-        ctx,
-        imageSize,
-        {.TRANSFER_SRC},
-        {.HOST_VISIBLE, .HOST_COHERENT},
-        &stagingBuffer
-    )
-
-    
-    fmt.println("Beginning command buffer for transfer...")
-    cmdBuffer := beginCommand(ctx)
-    
-    // Transition to transfer destination
-    barrier := vk.ImageMemoryBarrier{
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .TRANSFER_DST_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = texture.handle.texture,
-        subresourceRange = {
-            aspectMask = {.COLOR},
-            baseMipLevel = 0,
-            levelCount = 1,
-            baseArrayLayer = 0,
-            layerCount = 1,
-        },
-        srcAccessMask = {},
-        dstAccessMask = {.TRANSFER_WRITE},
-    }
-    
-    vk.CmdPipelineBarrier(
-        cmdBuffer,
-        {.TOP_OF_PIPE}, {.TRANSFER},
-        {}, 0, nil, 0, nil, 1, &barrier
-    )
-    
-    // Copy buffer to image
-    region := vk.BufferImageCopy{
-        bufferOffset = 0,
-        bufferRowLength = 0,
-        bufferImageHeight = 0,
-        imageSubresource = {
-            aspectMask = {.COLOR},
-            mipLevel = 0,
-            baseArrayLayer = 0,
-            layerCount = 1,
-        },
-        imageOffset = {0, 0, 0},
-        imageExtent = {u32(width), u32(height), 1},
-    }
-    
-    vk.CmdCopyBufferToImage(
-        cmdBuffer,
-        stagingBuffer.buffer,
-        texture.handle.texture,
-        .TRANSFER_DST_OPTIMAL,
-        1, &region
-    )
-    
-    // Transition to shader read layout
-    barrier.oldLayout = .TRANSFER_DST_OPTIMAL
-    barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
-    barrier.srcAccessMask = {.TRANSFER_WRITE}
-    barrier.dstAccessMask = {.SHADER_READ}
-    
-    vk.CmdPipelineBarrier(
-        cmdBuffer,
-        {.TRANSFER}, {.FRAGMENT_SHADER},
-        {}, 0, nil, 0, nil, 1, &barrier
-    )
-    
-    endCommand(ctx, &cmdBuffer)
-    
-    // Create image view
-    viewInfo := vk.ImageViewCreateInfo{
-        sType = .IMAGE_VIEW_CREATE_INFO,
-        image = texture.handle.texture,
-        viewType = .D2,
-        format = .R8G8B8A8_SRGB,
-        components = {
-            r = .IDENTITY,
-            g = .IDENTITY,
-            b = .IDENTITY,
-            a = .IDENTITY,
-        },
-        subresourceRange = {
-            aspectMask = {.COLOR},
-            baseMipLevel = 0,
-            levelCount = 1,
-            baseArrayLayer = 0,
-            layerCount = 1,
-        },
-    }
-    
-    if vk.CreateImageView(device, &viewInfo, nil, &texture.view) != .SUCCESS {
-        fmt.eprintf("Failed to create image view for texture: %s\n", path)
-        vk.DestroyImage(device, texture.handle.texture, nil)
-        vk.FreeMemory(device, texture.handle.memory, nil)
-        return texture
-    }
-    
-    // Create sampler
-    samplerInfo := vk.SamplerCreateInfo{
-        sType = .SAMPLER_CREATE_INFO,
-        magFilter = .LINEAR,
-        minFilter = .LINEAR,
-        addressModeU = .REPEAT,
-        addressModeV = .REPEAT,
-        addressModeW = .REPEAT,
-        anisotropyEnable = true,
-        maxAnisotropy = 16.0,
-        borderColor = .INT_OPAQUE_BLACK,
-        unnormalizedCoordinates = false,
-        compareEnable = false,
-        compareOp = .ALWAYS,
-        mipmapMode = .LINEAR,
-        mipLodBias = 0.0,
-        minLod = 0.0,
-        maxLod = 0.0,
-    }
-    
-    if vk.CreateSampler(device, &samplerInfo, nil, &texture.sampler) != .SUCCESS {
-        fmt.eprintf("Failed to create sampler for texture: %s\n", path)
-        vk.DestroyImageView(device, texture.view, nil)
-        vk.DestroyImage(device, texture.handle.texture, nil)
-        vk.FreeMemory(device, texture.handle.memory, nil)
-        return texture
-    }
-    
-    texture.mips = 1
-    fmt.printf("Successfully created texture %d: %s\n", textureIndex, path)
-    
     return texture
 }
 
@@ -273,7 +66,7 @@ loadAllTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
     fmt.printf("Loading %d textures...\n", len(data.images))
     
     // Create array for all textures
-    textures = make([]Texture, len(data.images))
+    textures = make([]^Texture, len(data.images))
     
     for i in 0..<len(data.images) {
         image := data.images[i]
@@ -368,7 +161,14 @@ setupGlb :: proc(using ctx: ^Context, filePath: cstring) {
                 vertexBuffer = vBuffer,
                 indexBuffer = iBuffer,
                 transform = linalg.MATRIX4F32_IDENTITY,
-                material = primitive.material,  // Store the pointer directly
+                material = primitive.material,  
+            })
+
+            append(&meshes, MeshObject{
+               vertexBuffer = vBuffer,
+               indexBuffer = iBuffer,
+               transform = linalg.matrix4_translate_f32(linalg.Vector3f32{2, 2, 2}),
+               material = primitive.material,  
             })
             
             fmt.printf("Loaded primitive with %d vertices, %d indices\n", 

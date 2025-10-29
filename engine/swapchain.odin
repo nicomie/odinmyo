@@ -173,6 +173,10 @@ recreateSwapchain :: proc(using ctx: ^Context) {
 cleanSwapchain :: proc(using ctx: ^Context) {   
     using ctx.vulkan
     using ctx.sc
+
+    for fb in swapchain.attachments.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
+    for view in swapchain.attachments.views do vk.DestroyImageView(device, view, nil)
+
     vk.DestroyImageView(device, colorImage.view, nil)
     vk.DestroyImage(device, colorImage.image.texture, nil)
     vk.FreeMemory(device, colorImage.image.memory, nil)
@@ -180,10 +184,7 @@ cleanSwapchain :: proc(using ctx: ^Context) {
     vk.DestroyImageView(device, depthImage.view, nil)
     vk.DestroyImage(device, depthImage.image.texture, nil)
     vk.FreeMemory(device, depthImage.image.memory, nil)
-
-
-    for fb in swapchain.attachments.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
-    for view in swapchain.attachments.views do vk.DestroyImageView(device, view, nil)
+  
     vk.DestroySwapchainKHR(device, swapchain.handle, nil)
 
 }

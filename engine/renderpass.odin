@@ -20,7 +20,7 @@ createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.Re
     colorAttachment := vk.AttachmentDescription{
         format = config.format,
         samples = {._1},
-        loadOp = .CLEAR ,
+        loadOp  = config.for_picking ? .CLEAR : (config.use_depth ? .CLEAR : .LOAD),
         storeOp = .STORE ,
         stencilLoadOp = .DONT_CARE,
         stencilStoreOp = .DONT_CARE,
@@ -69,7 +69,8 @@ createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.Re
         dstSubpass = 0,
         srcStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
         dstStageMask = {.COLOR_ATTACHMENT_OUTPUT, .EARLY_FRAGMENT_TESTS},
-        dstAccessMask = {.COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
+        srcAccessMask = {},
+        dstAccessMask = {.COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_WRITE},
     }
 
   

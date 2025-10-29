@@ -21,12 +21,21 @@ import cr "../engine/core"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 
+Vec2 :: linalg.Vector2f32
+Vec3 :: linalg.Vector3f32
+Vec4 :: linalg.Vector4f32
+
 Texture :: struct {
     handle: Image,
     view: vk.ImageView,
     sampler: vk.Sampler,
     mips: u32,
     uri: cstring,
+}
+
+UIContext :: struct {
+    elements: [dynamic]UI,
+    uiDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 PlatformContext :: struct {
@@ -69,6 +78,7 @@ FrameContext :: struct {
 PipelineContext :: struct {
     pipelines: map[string]vk.Pipeline, 
     meshPipelineLayout: vk.PipelineLayout,
+    uiPipelineLayout: vk.PipelineLayout,
     descriptorPool: vk.DescriptorPool,
     descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
     descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
@@ -88,7 +98,7 @@ IdPipelineContext :: struct {
 ResourceContext :: struct {
     uniformBuffers: []Buffer,
     uniformBuffersMapped: []rawptr,
-    textures: []Texture,
+    textures: []^Texture,
     meshes: [dynamic]MeshObject,
 }
 
@@ -96,6 +106,7 @@ SceneContext :: struct {
     camera: Camera,
     ray: Ray,
     toggleHover: bool,
+    isPlayer: bool,
 }
 
 Context :: struct {
@@ -106,6 +117,7 @@ Context :: struct {
     resource: ResourceContext,
     id: IdPipelineContext,
     scene: SceneContext,
+    ui: UIContext,
 
     frames: [MAX_FRAMES_IN_FLIGHT]FrameContext,
     currentFrame :u32,
@@ -157,7 +169,7 @@ initVulkan :: proc(using ctx: ^Context) {
     idRenderPass = createRenderPass(ctx, {
         format = .R8G8B8A8_UNORM,
         use_depth = true,
-        final_layout = .TRANSFER_SRC_OPTIMAL,
+        final_layout = .PRESENT_SRC_KHR,
     })
 
     createDescriptorSetLayouts(ctx)
@@ -174,11 +186,6 @@ initVulkan :: proc(using ctx: ^Context) {
     createFramebuffer(ctx)
     createObjectIdFramebuffer(ctx)
 
-    createTextureImage(ctx)
-    createTextureImageView(ctx)
-    createTextureSampler(ctx)
-
-
     createUniformBuffers(ctx)
     
     // Add this after creating ID resources but before command buffers
@@ -188,12 +195,14 @@ initVulkan :: proc(using ctx: ^Context) {
         imageSize, // RGBA8
         {.TRANSFER_DST},
         {.HOST_VISIBLE, .HOST_COHERENT},
-        &idStagingBuffer
+        &idStagingBuffer,
+        "idStaging"
     )
     createCommandBuffers(ctx)
     createDescriptorPool(ctx)
     createDescriptorSets(ctx)
-    createIdDescriptorSets(ctx)
+    createUiDescriptorSets(ctx)
+    //createIdDescriptorSets(ctx)
     createSyncObjects(ctx)
 
 }
@@ -205,40 +214,51 @@ exit :: proc(using ctx: ^Context) {
     using ctx.pipe
     using ctx.resource
     using ctx.id
+    vk.DeviceWaitIdle(device)
+
     cleanSwapchain(ctx)
 
-    vk.DestroyBuffer(device, idStagingBuffer.buffer, nil)
-    vk.FreeMemory(device, idStagingBuffer.memory, nil)
-    
+    // --- Staging ---
+    destroyBuffer("idStaging", device, idStagingBuffer)
+
+    // --- Images / textures ---
     vk.DestroyImageView(device, idImage.view, nil)
     vk.DestroyImage(device, idImage.image.texture, nil)
     vk.FreeMemory(device, idImage.image.memory, nil)
-    
+
+    for texture in textures {
+        vk.DestroySampler(device, texture^.sampler, nil)
+        vk.DestroyImageView(device, texture^.view, nil)
+        vk.DestroyImage(device, texture^.handle.texture, nil)
+        vk.FreeMemory(device, texture^.handle.memory, nil)
+    }
+   
+    // --- Framebuffers ---
     vk.DestroyFramebuffer(device, idFramebuffer, nil)
 
-    vk.DestroySampler(device, textures[0].sampler, nil)
-    
-    vk.DestroyImageView(device, textures[0].view, nil)
-    vk.DestroyImage(device, textures[0].handle.texture, nil)
-    vk.FreeMemory(device, textures[0].handle.memory, nil)
-
+    // --- Buffers ---
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        vk.DestroyBuffer(device, uniformBuffers[i].buffer, nil)
-        vk.FreeMemory(device,  uniformBuffers[i].memory, nil)
+        destroyBuffer(fmt.tprintf("ubo%d", i), device, uniformBuffers[i])
     }
 
+    // for mesh in meshes {
+    destroyBuffer("vBuffer", device, meshes[0].vertexBuffer^)
+    destroyBuffer("iBuffer", device, meshes[0].indexBuffer^)
+    
+
+    for el in ui.elements {
+        destroyBuffer("meshVertex", device, el.vertex^)
+        destroyBuffer("meshIndex", device, el.indices^)
+    }
+
+    // --- Descriptor cleanup ---
     vk.DestroyDescriptorPool(device, descriptorPool, nil)
     vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["mesh"], nil)
     vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["id"], nil)
+    vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["ui"], nil)
     delete(descriptorSetLayouts)
-    
-    for mesh in meshes {
-        vk.DestroyBuffer(device, mesh.vertexBuffer.buffer, nil)
-        vk.FreeMemory(device,  mesh.vertexBuffer.memory, nil)
-        vk.DestroyBuffer(device, mesh.indexBuffer.buffer, nil)
-        vk.FreeMemory(device,  mesh.indexBuffer.memory, nil)
-    }
 
+    // --- Pipelines ---
     for _, pipeline in pipelines {
         vk.DestroyPipeline(device, pipeline, nil)
     }
@@ -246,26 +266,35 @@ exit :: proc(using ctx: ^Context) {
 
     vk.DestroyPipelineLayout(device, meshPipelineLayout, nil)
     vk.DestroyPipelineLayout(device, idPipelineLayout, nil)
+    vk.DestroyPipelineLayout(device, uiPipelineLayout, nil)
 
+    // --- Render passes ---
     vk.DestroyRenderPass(device, renderPass, nil)
     vk.DestroyRenderPass(device, idRenderPass, nil)
 
+    // --- Sync ---
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphores, nil);
-        vk.DestroySemaphore(device, ctx.frames[i].renderFinishedSemaphores, nil);
-        vk.DestroyFence(device, ctx.frames[i].inFlightFences, nil);
+        vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphores, nil)
+        vk.DestroySemaphore(device, ctx.frames[i].renderFinishedSemaphores, nil)
+        vk.DestroyFence(device, ctx.frames[i].inFlightFences, nil)
     }
-   
-    vk.DestroyCommandPool(device, commandPool, nil)   
+
+    // --- Command pool ---
+    vk.DestroyCommandPool(device, commandPool, nil)
+
+    // --- Device and Instance ---
     vk.DestroyDevice(device, nil)
     when ODIN_DEBUG {
-       DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nil)
+        DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nil)
     }
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
+
+    // --- SDL ---
     sdl.DestroyWindow(window)
     sdl.Quit()
 }
+
 
 run :: proc(using ctx: ^Context) {
     using ctx.platform
@@ -284,6 +313,8 @@ run :: proc(using ctx: ^Context) {
                     #partial switch event.key.keysym.sym {
                         case .ESCAPE:
                             break loop
+                        case .SPACE:
+                            isPlayer = !isPlayer
                     }
                 case .MOUSEBUTTONDOWN:
                     if event.button.button == sdl.BUTTON_MIDDLE { 
@@ -347,6 +378,7 @@ main :: proc() {
     initContext(&ctx)
     initVulkan(&ctx)
     initCamera(&ctx)
+    AddUI(&ctx)
     run(&ctx)  
     exit(&ctx)
 }

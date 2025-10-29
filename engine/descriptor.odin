@@ -49,9 +49,15 @@ createDescriptorSetLayouts :: proc(using ctx: ^Context) {
         {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX, .FRAGMENT}}, 
     })
 
+   uiDescriptorSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
+        {binding = 0, type = .COMBINED_IMAGE_SAMPLER,    shaderStageFlags = {.FRAGMENT}},
+    })
+    
     descriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
     descriptorSetLayouts["mesh"] = meshDescriptorSetLayout
     descriptorSetLayouts["id"] = idDescriptorSetLayout
+    descriptorSetLayouts["ui"] = uiDescriptorSetLayout
+
 }
 
 
@@ -139,6 +145,51 @@ createDescriptorSets :: proc(using ctx: ^Context) {
         }
 
         vk.UpdateDescriptorSets(device, cast(u32)len(meshDescriptorWrites), &meshDescriptorWrites[0], 0, nil)
+    }
+}
+
+createUiDescriptorSets :: proc(using ctx: ^Context) {
+    using ctx.vulkan
+    using ctx.pipe
+    using ctx.resource
+    using ctx.ui
+    layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        layouts[i] = descriptorSetLayouts["ui"]
+    }
+
+    allocInfo := vk.DescriptorSetAllocateInfo{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = descriptorPool,
+        descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        pSetLayouts = &layouts[0],
+    }
+
+    if vk.AllocateDescriptorSets(device, &allocInfo, &ctx.ui.uiDescriptorSets[0]) != .SUCCESS {
+        fmt.eprintln("failed to allocate ui descriptor sets")
+        os.exit(1)
+    }
+
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        imageInfo := vk.DescriptorImageInfo{
+            imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+            imageView = textures[0].view,
+            sampler = textures[0].sampler,
+        }
+
+        descriptorWrites := []vk.WriteDescriptorSet{
+            {
+                sType = .WRITE_DESCRIPTOR_SET,
+                dstSet = uiDescriptorSets[i],
+                dstBinding = 0,
+                dstArrayElement = 0,
+                descriptorType = .COMBINED_IMAGE_SAMPLER,
+                descriptorCount = 1,
+                pImageInfo = &imageInfo,
+            },
+        }
+
+        vk.UpdateDescriptorSets(device, cast(u32)len(descriptorWrites), &descriptorWrites[0], 0, nil)
     }
 }
 

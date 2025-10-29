@@ -22,7 +22,8 @@ createBuffer :: proc(
     usage: vk.BufferUsageFlags, 
     properties: vk.MemoryPropertyFlags, 
     buffer: ^Buffer,
-    data: rawptr = nil
+    name: string = "not specified",
+    data: rawptr = nil,
 ) {
     using ctx.vulkan
     
@@ -52,6 +53,8 @@ createBuffer :: proc(
         mem.copy(ptr, data, int(bufferSize))
         vk.UnmapMemory(device, buffer.memory)
     }
+
+    fmt.printf("Created buffer %s: %p\n", name, buffer.buffer)
 }
 
 copyBuffer :: proc(using ctx: ^Context, src, dst: Buffer, size: vk.DeviceSize) {
@@ -65,43 +68,43 @@ copyBuffer :: proc(using ctx: ^Context, src, dst: Buffer, size: vk.DeviceSize) {
     vk.CmdCopyBuffer(cmdBuffer, src.buffer, dst.buffer, 1, &copyRegion)
 }
 
-createVertexBuffer :: proc(using ctx: ^Context, vertices: []Vertex) -> Buffer {
+createVertexBuffer :: proc(using ctx: ^Context, vertices: []$T) -> ^Buffer {
     using ctx.vulkan
-    buffer: Buffer
+    buffer := new(Buffer)
     buffer.length = len(vertices)
-    buffer.size = cast(vk.DeviceSize)(len(vertices) * size_of(Vertex))
+    buffer.size = cast(vk.DeviceSize)(len(vertices) * size_of(T))
     
     staging: Buffer 
-    createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging, raw_data(vertices))
+    createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, 
+        &staging, "vStaging", raw_data(vertices))
     
-    createBuffer(ctx, buffer.size, {.VERTEX_BUFFER, .TRANSFER_DST}, {.DEVICE_LOCAL}, &buffer)
-    copyBuffer(ctx, staging, buffer, buffer.size)
+    createBuffer(ctx, buffer.size, {.VERTEX_BUFFER, .TRANSFER_DST}, 
+        {.DEVICE_LOCAL}, buffer, "vBuffer")
+    copyBuffer(ctx, staging, buffer^, buffer.size)
 
-    vk.DestroyBuffer(device, staging.buffer, nil)
-    vk.FreeMemory(device, staging.memory, nil)
-
+    destroyBuffer("vStaging", ctx.vulkan.device, staging)
     return buffer
 }
 
-createIndexBuffer :: proc(using ctx: ^Context, indices: []u32) -> Buffer{
+createIndexBuffer :: proc(using ctx: ^Context, indices: []u32) -> ^Buffer{
     using ctx.vulkan
-    buffer: Buffer
+    buffer := new(Buffer)
     buffer.length = len(indices)
     buffer.size = cast(vk.DeviceSize)(len(indices) * size_of(indices[0]))
 
     staging: Buffer 
-    createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging)
+    createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging,
+    "indexStaging")
 
     data: rawptr 
     vk.MapMemory(device, staging.memory, 0, buffer.size, {}, &data)
     mem.copy(data, raw_data(indices), cast(int)buffer.size)
     vk.UnmapMemory(device, staging.memory)
 
-    createBuffer(ctx ,buffer.size, {.TRANSFER_DST, .INDEX_BUFFER}, {.DEVICE_LOCAL}, &buffer)
-    copyBuffer(ctx, staging, buffer, buffer.size)
+    createBuffer(ctx ,buffer.size, {.TRANSFER_DST, .INDEX_BUFFER}, {.DEVICE_LOCAL}, buffer, "iBuffer")
+    copyBuffer(ctx, staging, buffer^, buffer.size)
 
-    vk.DestroyBuffer(device, staging.buffer, nil)
-    vk.FreeMemory(device, staging.memory, nil)
+    destroyBuffer("indexStaging", ctx.vulkan.device, staging)
 
     return buffer
 }
@@ -218,7 +221,76 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
 
 }
 
-recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
+recordUICommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) -> (lastPass: bool, b: vk.CommandBuffer) {
+    using ctx.sc
+    using ctx.pipe
+    using ctx.ui
+    using ctx.resource
+
+    viewport: vk.Viewport
+    viewport.x = 0.0
+    viewport.y = 0.0
+    viewport.width = cast(f32)swapchain.extent.width
+    viewport.height = cast(f32)swapchain.extent.height
+    viewport.minDepth = 0.0
+    viewport.maxDepth = 1.0
+    vk.CmdSetViewport(buffer, 0, 1, &viewport)
+
+    scissor: vk.Rect2D
+    scissor.offset = {0, 0}
+    scissor.extent = swapchain.extent
+    vk.CmdSetScissor(buffer, 0, 1, &scissor)
+
+    vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["ui"])
+    vk.CmdBindDescriptorSets(buffer, .GRAPHICS, uiPipelineLayout, 0, 1, &uiDescriptorSets[currentFrame], 0, nil)
+
+
+    for &element in elements {
+        // Push constants: model matrix and color
+        model := screenToNDC(element.pos, element.size, ctx.sc.swapchain)
+      
+        vk.CmdPushConstants(
+            buffer,
+            uiPipelineLayout,
+              {.VERTEX, .FRAGMENT}, 
+            0,                 
+            size_of(linalg.Matrix4x4f32), 
+            &model
+        )
+
+        vk.CmdPushConstants(
+            buffer,
+            uiPipelineLayout,
+            {.VERTEX, .FRAGMENT},
+            size_of(linalg.Matrix4x4f32),
+            size_of(linalg.Vector4f32),
+            &element.color
+        )
+
+        // Bind quad vertex/index buffers
+        vertexBuffers := [?]vk.Buffer{element.vertex.buffer}
+        offsets := [?]vk.DeviceSize{0}
+        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
+        vk.CmdBindIndexBuffer(buffer, element.indices.buffer, 0, .UINT32)
+
+        vk.CmdDrawIndexed(buffer, cast(u32)element.indices.length, 1, 0, 0, 0)
+    }
+
+        // --- End render pass ---
+    vk.CmdEndRenderPass(buffer)
+    checkVk(vk.EndCommandBuffer(buffer))
+
+    return true, nil
+}
+
+
+destroyBuffer :: proc(name: string, device: vk.Device, buf: Buffer) {
+    fmt.printf("Destroying buffer %s: %p\n", name, buf.buffer)
+    vk.DestroyBuffer(device, buf.buffer, nil)
+    vk.FreeMemory(device, buf.memory, nil)
+}
+
+recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) -> (lastPass: bool, b: vk.CommandBuffer) {
     using ctx.sc
     using ctx.pipe
     using ctx.resource
@@ -285,12 +357,10 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
         vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
     }
 
-    vk.CmdEndRenderPass(buffer)
-
-    checkVk(vk.EndCommandBuffer(buffer))
+    return false, buffer
 }
 
-copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
+copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32, texture: ^Texture) {
     using ctx.resource
     cmdBuffer := beginCommand(ctx)
     defer endCommand(ctx, &cmdBuffer)
@@ -306,5 +376,5 @@ copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32) {
     region.imageOffset = {0,0,0}
     region.imageExtent = {w,h,1}
 
-    vk.CmdCopyBufferToImage(cmdBuffer, buffer, textures[0].handle.texture, .TRANSFER_DST_OPTIMAL, 1, &region)
+    vk.CmdCopyBufferToImage(cmdBuffer, buffer, texture.handle.texture, .TRANSFER_DST_OPTIMAL, 1, &region)
 }
