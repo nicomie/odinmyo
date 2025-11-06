@@ -24,6 +24,7 @@ MAX_FRAMES_IN_FLIGHT :: 2
 Vec2 :: linalg.Vector2f32
 Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
+Mat4 :: linalg.Matrix4f32
 
 Texture :: struct {
     handle: Image,
@@ -34,7 +35,8 @@ Texture :: struct {
 }
 
 UIContext :: struct {
-    elements: [dynamic]UI,
+    font: Font,
+    elements: [dynamic]UIElement,
     uiDescriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
@@ -201,6 +203,7 @@ initVulkan :: proc(using ctx: ^Context) {
     createCommandBuffers(ctx)
     createDescriptorPool(ctx)
     createDescriptorSets(ctx)
+    bool := AddUI(ctx)
     createUiDescriptorSets(ctx)
     //createIdDescriptorSets(ctx)
     createSyncObjects(ctx)
@@ -247,9 +250,10 @@ exit :: proc(using ctx: ^Context) {
     
 
     for el in ui.elements {
-        destroyBuffer("meshVertex", device, el.vertex^)
-        destroyBuffer("meshIndex", device, el.indices^)
+        destroyBuffer("meshVertex", device, ui.elements[0].vertex_buffer^)      
     }
+    free_font(ctx, &ui.font)
+
 
     // --- Descriptor cleanup ---
     vk.DestroyDescriptorPool(device, descriptorPool, nil)
@@ -308,14 +312,19 @@ run :: proc(using ctx: ^Context) {
         event: sdl.Event
         for sdl.PollEvent(&event) {
             #partial switch event.type {
-                case .KEYDOWN, .KEYUP:
-                    key_state := sdl.GetKeyboardState(nil)
-                    #partial switch event.key.keysym.sym {
-                        case .ESCAPE:
-                            break loop
-                        case .SPACE:
-                            isPlayer = !isPlayer
-                    }
+                    case .KEYDOWN:
+                        #partial switch event.key.keysym.sym {
+                            case .ESCAPE:
+                                break loop
+                            case .SPACE:
+                                isPlayer = !isPlayer
+                                ctx.ui.elements[0].stagedText = isPlayer ? "Playing" : "Viewing"
+                                fmt.printf("isPlayer toggled to: %t\n", isPlayer)
+                        }
+                    case .KEYUP:
+                        #partial switch event.key.keysym.sym {
+                            case .ESCAPE:
+                        }
                 case .MOUSEBUTTONDOWN:
                     if event.button.button == sdl.BUTTON_MIDDLE { 
                         clickPending = true
@@ -378,7 +387,6 @@ main :: proc() {
     initContext(&ctx)
     initVulkan(&ctx)
     initCamera(&ctx)
-    AddUI(&ctx)
     run(&ctx)  
     exit(&ctx)
 }

@@ -1,5 +1,6 @@
 package engine
 
+import "core:encoding/base32"
 import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
@@ -144,7 +145,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
 
     barrier := vk.ImageMemoryBarrier{
         sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED, // Or whatever layout it's currently in
+        oldLayout = .UNDEFINED, 
         newLayout = .COLOR_ATTACHMENT_OPTIMAL,
         image = idImage.image.texture,
         subresourceRange = {
@@ -221,69 +222,6 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
 
 }
 
-recordUICommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) -> (lastPass: bool, b: vk.CommandBuffer) {
-    using ctx.sc
-    using ctx.pipe
-    using ctx.ui
-    using ctx.resource
-
-    viewport: vk.Viewport
-    viewport.x = 0.0
-    viewport.y = 0.0
-    viewport.width = cast(f32)swapchain.extent.width
-    viewport.height = cast(f32)swapchain.extent.height
-    viewport.minDepth = 0.0
-    viewport.maxDepth = 1.0
-    vk.CmdSetViewport(buffer, 0, 1, &viewport)
-
-    scissor: vk.Rect2D
-    scissor.offset = {0, 0}
-    scissor.extent = swapchain.extent
-    vk.CmdSetScissor(buffer, 0, 1, &scissor)
-
-    vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["ui"])
-    vk.CmdBindDescriptorSets(buffer, .GRAPHICS, uiPipelineLayout, 0, 1, &uiDescriptorSets[currentFrame], 0, nil)
-
-
-    for &element in elements {
-        // Push constants: model matrix and color
-        model := screenToNDC(element.pos, element.size, ctx.sc.swapchain)
-      
-        vk.CmdPushConstants(
-            buffer,
-            uiPipelineLayout,
-              {.VERTEX, .FRAGMENT}, 
-            0,                 
-            size_of(linalg.Matrix4x4f32), 
-            &model
-        )
-
-        vk.CmdPushConstants(
-            buffer,
-            uiPipelineLayout,
-            {.VERTEX, .FRAGMENT},
-            size_of(linalg.Matrix4x4f32),
-            size_of(linalg.Vector4f32),
-            &element.color
-        )
-
-        // Bind quad vertex/index buffers
-        vertexBuffers := [?]vk.Buffer{element.vertex.buffer}
-        offsets := [?]vk.DeviceSize{0}
-        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-        vk.CmdBindIndexBuffer(buffer, element.indices.buffer, 0, .UINT32)
-
-        vk.CmdDrawIndexed(buffer, cast(u32)element.indices.length, 1, 0, 0, 0)
-    }
-
-        // --- End render pass ---
-    vk.CmdEndRenderPass(buffer)
-    checkVk(vk.EndCommandBuffer(buffer))
-
-    return true, nil
-}
-
-
 destroyBuffer :: proc(name: string, device: vk.Device, buf: Buffer) {
     fmt.printf("Destroying buffer %s: %p\n", name, buf.buffer)
     vk.DestroyBuffer(device, buf.buffer, nil)
@@ -358,6 +296,44 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     }
 
     return false, buffer
+}
+
+recordUICommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) -> (lastPass: bool, b: vk.CommandBuffer) {
+    using ctx.sc
+    using ctx.pipe
+    using ctx.ui
+    using ctx.resource
+
+    vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["ui"])
+    vk.CmdBindDescriptorSets(buffer, .GRAPHICS, uiPipelineLayout, 0, 1, &uiDescriptorSets[currentFrame], 0, nil)
+
+    for &element in elements {
+        screen_size := Vec2{f32(swapchain.extent.width), f32(swapchain.extent.height)}
+        vk.CmdPushConstants(
+            buffer,
+            uiPipelineLayout,
+            {.VERTEX, .FRAGMENT},
+            0,                 
+            size_of(Vec2), 
+            &screen_size,
+        )
+
+        if &element.vertex_buffer^ != nil {
+            vertexBuffers := [?]vk.Buffer{element.vertex_buffer.buffer}
+            offsets := [?]vk.DeviceSize{0}
+            vk.CmdBindVertexBuffers(buffer, 0, 1, raw_data(vertexBuffers[:]), raw_data(offsets[:]))
+            vk.CmdDraw(buffer, u32(element.vertex_buffer.length), 1, 0, 0)
+        }
+    }
+
+    vk.CmdEndRenderPass(buffer)
+    
+    if vk.EndCommandBuffer(buffer) != .SUCCESS {
+        fmt.eprintln("failed to end command buffer")
+        return false, nil
+    }
+
+    return true, buffer
 }
 
 copyBufferToImage :: proc(using ctx: ^Context, buffer: vk.Buffer, w,h : u32, texture: ^Texture) {

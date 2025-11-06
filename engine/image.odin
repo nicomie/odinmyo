@@ -250,3 +250,48 @@ transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.F
 
     vk.CmdPipelineBarrier(cmdBuffer, sourceStage, destinationStage, {}, 0, nil, 0, nil, 1, &barrier)
 }
+
+createFontTextureImage :: proc(
+    using ctx: ^Context, 
+    texture: ^Texture,
+    atlas_data: []u8,
+    width, height: u32,
+    name: string = "font_atlas",
+) {
+    using ctx.vulkan
+    using ctx.resource
+
+    fmt.printf("Creating font texture %s: %dx%d\n", name, width, height)
+
+    imageSize := cast(vk.DeviceSize)(width * height)
+
+    if len(atlas_data) != int(imageSize) {
+        fmt.eprintf("ERROR: Font atlas data size mismatch. Expected %d, got %d\n", 
+            imageSize, len(atlas_data))
+        return
+    }
+
+    stagingBuffer: Buffer 
+    createBuffer(ctx, imageSize, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &stagingBuffer, "fontStaging")
+    defer destroyBuffer("fontStaging", device, stagingBuffer)
+
+    data: rawptr
+    vk.MapMemory(device, stagingBuffer.memory, 0, imageSize, {}, &data)
+    mem.copy(data, raw_data(atlas_data), int(imageSize))
+    vk.UnmapMemory(device, stagingBuffer.memory)
+
+    createImage(ctx, width, height, 1, {._1}, .R8_UNORM, .OPTIMAL, 
+                {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture.handle)
+    
+    transitionImageLayout(ctx, texture.handle.texture, .R8_UNORM, .UNDEFINED, .TRANSFER_DST_OPTIMAL, 1)
+    copyBufferToImage(ctx, stagingBuffer.buffer, width, height, texture)
+    transitionImageLayout(ctx, texture.handle.texture, .R8_UNORM, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL, 1)
+
+    texture.view = createImageView(ctx, texture.handle.texture, .R8_UNORM, {.COLOR}, 1, strings.clone_to_cstring(name))
+    
+    texture.sampler = create_font_sampler(ctx)
+    texture.mips = 1
+    texture.uri = strings.clone_to_cstring(name)
+
+    fmt.printf("SUCCESS: Created font texture %dx%d\n", width, height)
+}

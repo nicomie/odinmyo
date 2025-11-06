@@ -50,7 +50,7 @@ createDescriptorSetLayouts :: proc(using ctx: ^Context) {
     })
 
    uiDescriptorSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
-        {binding = 0, type = .COMBINED_IMAGE_SAMPLER,    shaderStageFlags = {.FRAGMENT}},
+        {binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}},
     })
     
     descriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
@@ -173,10 +173,10 @@ createUiDescriptorSets :: proc(using ctx: ^Context) {
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         imageInfo := vk.DescriptorImageInfo{
             imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-            imageView = textures[0].view,
-            sampler = textures[0].sampler,
+            imageView = font.texture.view,
+            sampler = font.texture.sampler
         }
-
+    
         descriptorWrites := []vk.WriteDescriptorSet{
             {
                 sType = .WRITE_DESCRIPTOR_SET,

@@ -45,7 +45,7 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
     uiPushRange := vk.PushConstantRange{
         stageFlags = {.VERTEX, .FRAGMENT},
         offset = 0,
-        size = size_of(linalg.Matrix4f32) + size_of(Vec4),  
+        size = size_of(Vec2),  
     }
 
      uiPipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
