@@ -1,4 +1,4 @@
-package engine 
+package engine
 
 import mu "vendor:microui"
 import sdl "vendor:sdl2"
@@ -21,24 +21,6 @@ UIElement :: struct {
     stagedText: string,
 }
 
-debug_vertices :: proc(vertices: []TextVertex, text: string) {    
-    if len(vertices) > 0 {
-        
-        min_x, max_x, min_y, max_y: f32 = f32(max(f32)), -f32(max(f32)), f32(max(f32)), -f32(max(f32))
-        for v in vertices {
-            min_x = min(min_x, v.pos.x)
-            max_x = max(max_x, v.pos.x)
-            min_y = min(min_y, v.pos.y)
-            max_y = max(max_y, v.pos.y)
-        }
-        fmt.printf("Bounds: x[%.1f, %.1f] y[%.1f, %.1f]\n", min_x, max_x, min_y, max_y)
-    }
-}
-
-debug_glyph_tex_coords :: proc(font: ^Font) {
-    for ch in 'A'..<'F' {
-        glyph := font.glyphs[ch]
-}
 
 UpdateUI :: proc(ctx: ^Context) {
     using ctx.ui
@@ -122,6 +104,4 @@ UI_VERTEX_ATTRIBUTES := [3]vk.VertexInputAttributeDescription{
         format = .R32G32B32_SFLOAT,  
         offset = cast(u32)offset_of(TextVertex, color),
     },
-}
-
 }
