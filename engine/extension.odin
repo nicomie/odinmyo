@@ -7,8 +7,7 @@ import "core:os"
 
 EXTENSIONS := [?]cstring{
     "VK_KHR_display", 
-    "VK_KHR_surface", 
-    "VK_KHR_xcb_surface", 
+    "VK_KHR_surface",  
     "VK_EXT_debug_utils", 
 }  
 DEVICE_EXTENSIONS := [?]cstring{
