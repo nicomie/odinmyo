@@ -21,14 +21,14 @@ drawFrame :: proc(using ctx: ^Context) {
         os.exit(1)
     }
 
+    UpdateUI(ctx)
     vk.ResetFences(device, 1, &ctx.frames[currentFrame].inFlightFences)
-
+    
     vk.ResetCommandBuffer(ctx.frames[currentFrame].commandBuffers, {})
     updateUniformBuffer(ctx, currentFrame)
     _, buffer := recordCommandBuffer(ctx, ctx.frames[currentFrame].commandBuffers, imageIndex)
     _, _ =  recordUICommandBuffer(ctx, buffer, imageIndex)
-    UpdateUI(ctx)
-    
+ 
     waitSemaphores := [?]vk.Semaphore{ctx.frames[currentFrame].imageAvailableSemaphores}
     waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
 
