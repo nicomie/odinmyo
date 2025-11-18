@@ -320,8 +320,8 @@ run :: proc(using ctx: ^Context) {
                             case .SPACE:
                                 isPlayer = !isPlayer
                                 ctx.ui.elements[0].stagedText = isPlayer ? "Playing" : "Viewing"
-                                if !isPlayer do camera_system_toggle(&cameraSystem, .Free)
-                                if isPlayer do camera_system_toggle(&cameraSystem, .Player)
+                                if !isPlayer do camera_system_toggle(&ctx.resource, &cameraSystem, .Free)
+                                if isPlayer do camera_system_toggle(&ctx.resource, &cameraSystem, .Player)
                                 fmt.printf("isPlayer toggled to: %t\n", isPlayer)
                         }
                     case .KEYUP:
