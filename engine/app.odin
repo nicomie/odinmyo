@@ -105,7 +105,7 @@ ResourceContext :: struct {
 }
 
 SceneContext :: struct {
-    camera: Camera,
+    cameraSystem: CameraSystem,
     ray: Ray,
     toggleHover: bool,
     isPlayer: bool,
@@ -308,6 +308,7 @@ run :: proc(using ctx: ^Context) {
         target_frame_time := 1.0 / 240.0
         frame_start := time.now()
         cr.update(timeContext)
+        camera := camera_system_get_active(&cameraSystem)
 
         event: sdl.Event
         for sdl.PollEvent(&event) {
@@ -319,6 +320,8 @@ run :: proc(using ctx: ^Context) {
                             case .SPACE:
                                 isPlayer = !isPlayer
                                 ctx.ui.elements[0].stagedText = isPlayer ? "Playing" : "Viewing"
+                                if !isPlayer do camera_system_toggle(&cameraSystem, .Free)
+                                if isPlayer do camera_system_toggle(&cameraSystem, .Player)
                                 fmt.printf("isPlayer toggled to: %t\n", isPlayer)
                         }
                     case .KEYUP:

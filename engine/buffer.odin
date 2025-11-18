@@ -192,8 +192,10 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
         axis := linalg.Vector3f32{0, 0, 1}
         model := linalg.matrix4_rotate(angle, axis)
         mesh.transform = model
+        camera := cameraSystem.cameras[cameraSystem.active_camera_type] 
 
         ubo: UBO
+        
         ubo.view = camera.view
         ubo.proj = camera.projection
         

@@ -31,7 +31,7 @@ Material :: struct {
 MeshObject :: struct {
     vertexBuffer: ^Buffer, 
     indexBuffer: ^Buffer,
-    transform: linalg.Matrix4x4f32,
+    transform: Mat4,
     material: ^cgltf.material,
 }
 
