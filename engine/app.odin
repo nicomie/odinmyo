@@ -26,14 +26,6 @@ Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 Mat4 :: linalg.Matrix4f32
 
-Texture :: struct {
-    handle: Image,
-    view: vk.ImageView,
-    sampler: vk.Sampler,
-    mips: u32,
-    uri: cstring,
-}
-
 UIContext :: struct {
     font: Font,
     elements: [dynamic]UIElement,
@@ -83,7 +75,6 @@ PipelineContext :: struct {
     uiPipelineLayout: vk.PipelineLayout,
     descriptorPool: vk.DescriptorPool,
     descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
-    descriptorSets: [2*MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 IdPipelineContext :: struct {
@@ -97,18 +88,12 @@ IdPipelineContext :: struct {
     
 }
 
-ResourceContext :: struct {
-    uniformBuffers: []Buffer,
-    uniformBuffersMapped: []rawptr,
-    textures: []^Texture,
-    meshes: [dynamic]MeshObject,
-}
-
 SceneContext :: struct {
     cameraSystem: CameraSystem,
     ray: Ray,
     toggleHover: bool,
     isPlayer: bool,
+    mesh: Mesh,
 }
 
 Context :: struct {
@@ -116,7 +101,7 @@ Context :: struct {
     vulkan: VulkanContext,
     sc: SwapchainContext,
     pipe: PipelineContext,
-    resource: ResourceContext,
+    resource: ResourceManager,
     id: IdPipelineContext,
     scene: SceneContext,
     ui: UIContext,
@@ -159,7 +144,6 @@ initVulkan :: proc(using ctx: ^Context) {
     createLogicalDevice(ctx)
     createSwapchain(ctx)
     createImageViews(ctx)
-
     findQueueFamilies(ctx)
 
     renderPass = createRenderPass(ctx, {
@@ -177,10 +161,8 @@ initVulkan :: proc(using ctx: ^Context) {
     createDescriptorSetLayouts(ctx)
     createPipelineLayouts(ctx)
     createCommandPool(ctx)
-
     createPipelines(ctx)
-    setupGlb(ctx, "glbs/SciFiHelmet/glTF/SciFiHelmet.gltf")
-
+    setupGlb(ctx, "glbs/CesiumMilkTruck/CesiumMilkTruck.gltf")
     createColorResources(ctx)
     createDepthResource(ctx)
     createIdResource(ctx)
@@ -189,6 +171,7 @@ initVulkan :: proc(using ctx: ^Context) {
     createObjectIdFramebuffer(ctx)
 
     createUniformBuffers(ctx)
+
     
     // Add this after creating ID resources but before command buffers
     imageSize := cast(vk.DeviceSize)(swapchain.extent.width * swapchain.extent.height * 4)
@@ -202,9 +185,17 @@ initVulkan :: proc(using ctx: ^Context) {
     )
     createCommandBuffers(ctx)
     createDescriptorPool(ctx)
-    createDescriptorSets(ctx)
+
+    createGlobalDescriptorSets(ctx)
+    fmt.println("HELOO")
+    createMaterialDescriptorSets(ctx)
+
     bool := AddUI(ctx)
     createUiDescriptorSets(ctx)
+
+
+
+
     //createIdDescriptorSets(ctx)
     createSyncObjects(ctx)
 
@@ -240,13 +231,14 @@ exit :: proc(using ctx: ^Context) {
     vk.DestroyFramebuffer(device, idFramebuffer, nil)
 
     // --- Buffers ---
-    for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        destroyBuffer(fmt.tprintf("ubo%d", i), device, uniformBuffers[i])
-    }
+    freeCameras(ctx)
 
     // for mesh in meshes {
-    destroyBuffer("vBuffer", device, meshes[0].vertexBuffer^)
-    destroyBuffer("iBuffer", device, meshes[0].indexBuffer^)
+    for &mesh in meshes {
+        destroyBuffer("vBuffer", device, mesh.vertexBuffer^)
+        destroyBuffer("iBuffer", device, mesh.indexBuffer^)
+    }
+   
     
 
     for el in ui.elements {
@@ -257,8 +249,8 @@ exit :: proc(using ctx: ^Context) {
 
     // --- Descriptor cleanup ---
     vk.DestroyDescriptorPool(device, descriptorPool, nil)
-    vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["mesh"], nil)
-    vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["id"], nil)
+    vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["global"], nil)
+    vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["material"], nil)
     vk.DestroyDescriptorSetLayout(device, descriptorSetLayouts["ui"], nil)
     delete(descriptorSetLayouts)
 
@@ -320,8 +312,8 @@ run :: proc(using ctx: ^Context) {
                             case .SPACE:
                                 isPlayer = !isPlayer
                                 ctx.ui.elements[0].stagedText = isPlayer ? "Playing" : "Viewing"
-                                if !isPlayer do camera_system_toggle(&ctx.resource, &cameraSystem, .Free)
-                                if isPlayer do camera_system_toggle(&ctx.resource, &cameraSystem, .Player)
+                                if !isPlayer do camera_system_toggle(&cameraSystem, .Free)
+                                if isPlayer do camera_system_toggle(&cameraSystem, .Player)
                                 fmt.printf("isPlayer toggled to: %t\n", isPlayer)
                         }
                     case .KEYUP:

@@ -187,36 +187,7 @@ recordIdBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer) {
     vk.CmdBindDescriptorSets(buffer, .GRAPHICS, idPipelineLayout, 0, 1, &idDescriptorSets[currentFrame], 0, nil)
 
  
-    for &mesh,i in meshes {
-        angle := math.to_radians_f32(90) * timeContext.timeElapsed
-        axis := linalg.Vector3f32{0, 0, 1}
-        model := linalg.matrix4_rotate(angle, axis)
-        mesh.transform = model
-        camera := cameraSystem.cameras[cameraSystem.active_camera_type] 
-
-        ubo: UBO
-        
-        ubo.view = camera.view
-        ubo.proj = camera.projection
-        
-        mem.copy(uniformBuffersMapped[currentFrame], &ubo, size_of(ubo))
-
-        vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
-        offsets := [?]vk.DeviceSize{0}
-
-        vk.CmdPushConstants(
-            buffer, 
-            meshPipelineLayout,
-            {.VERTEX}, 
-            0, 
-            size_of(linalg.Matrix4x4f32), 
-            &model
-        )
-
-        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT32)
-        vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
-    }
+    // render
 
     vk.CmdEndRenderPass(buffer)
 
@@ -234,6 +205,8 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     using ctx.sc
     using ctx.pipe
     using ctx.resource
+    using ctx.scene
+
     beginInfo: vk.CommandBufferBeginInfo
     beginInfo.sType = .COMMAND_BUFFER_BEGIN_INFO
     beginInfo.pInheritanceInfo = nil
@@ -273,28 +246,37 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
 
     vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["mesh"])
 
-    vk.CmdBindDescriptorSets(buffer, vk.PipelineBindPoint.GRAPHICS,
-                        meshPipelineLayout, 
-                        0, 1, &descriptorSets[currentFrame], 0, nil);
+    vk.CmdBindDescriptorSets(buffer, vk.PipelineBindPoint.GRAPHICS,meshPipelineLayout, 
+                        0, 1, &cameraSystem.descriptorSets[currentFrame], 0, nil);
 
-    for &mesh in meshes {
-    
+                    
+
+    for &o in meshObjects {
+        mesh := meshes[o.meshIndex]
+
+
         vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
         offsets := [?]vk.DeviceSize{0}
 
+        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
+        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT32)
 
         vk.CmdPushConstants(
             buffer, 
             meshPipelineLayout,
             {.VERTEX}, 
             0, 
-            size_of(linalg.Matrix4x4f32), 
-            &mesh.transform
+            size_of(Mat4), 
+            &o.worldTransform
         )
 
-        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT32)
-        vk.CmdDrawIndexed(buffer, cast(u32)mesh.indexBuffer.length, 1, 0, 0, 0)
+        for primitive in mesh.primitives {
+            matIndex := primitive.materialIndex
+            vk.CmdBindDescriptorSets(buffer, .GRAPHICS, meshPipelineLayout, 1, 1, 
+                &materials[matIndex].descriptorSets[currentFrame], 0, nil)
+            vk.CmdDrawIndexed(buffer, cast(u32)primitive.indexCount, 1, cast(u32)primitive.firstIndex, primitive.firstVertex, 0)
+
+        }
     }
 
     return false, buffer

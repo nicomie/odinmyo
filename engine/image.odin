@@ -127,6 +127,15 @@ createIdImageView :: proc(using ctx: ^Context) {
     idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, 1, "id")
 }
 
+getBaseDirectory :: proc(gltfPath: string) -> string {
+    lastSlash := strings.last_index(gltfPath, "/")
+    if lastSlash == -1 {
+        return "./"  // Current directory if no slashes
+    }
+    return gltfPath[:lastSlash+1]
+}
+
+
 createTextureImage :: proc(using ctx: ^Context, texture: ^Texture,
 path: string, textureIndex: int){
     using ctx.vulkan

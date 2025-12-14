@@ -12,13 +12,18 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
     pRanges := vk.PushConstantRange{
         stageFlags = {.VERTEX},
         offset = 0,
-        size = size_of(linalg.Matrix4f32),
+        size = size_of(Mat4),
+    }
+
+    meshLayouts := [2]vk.DescriptorSetLayout{
+        descriptorSetLayouts["global"],   
+        descriptorSetLayouts["material"]
     }
 
     pipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
-        setLayoutCount = 1,
-        pSetLayouts = &descriptorSetLayouts["mesh"],
+        setLayoutCount = cast(u32)len(meshLayouts),
+        pSetLayouts = &meshLayouts[0],
         pushConstantRangeCount = 1,
         pPushConstantRanges = &pRanges
     }
@@ -31,7 +36,7 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
     pipelineLayoutInfo = vk.PipelineLayoutCreateInfo{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = 1,
-        pSetLayouts = &descriptorSetLayouts["id"],
+        pSetLayouts = &descriptorSetLayouts["global"],
         pushConstantRangeCount = 1,
         pPushConstantRanges = &pRanges
     }
@@ -88,7 +93,6 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     defer vk.DestroyShaderModule(device, vertShaderModule, nil)
     defer vk.DestroyShaderModule(device, fragShaderModule, nil)
 
-    // Shader stages
     vertShaderStage := vk.PipelineShaderStageCreateInfo{
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
@@ -105,7 +109,6 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
 
     shaderStages := []vk.PipelineShaderStageCreateInfo{vertShaderStage, fragShaderStage}
 
-
     vertexInput := vk.PipelineVertexInputStateCreateInfo{
         sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         vertexBindingDescriptionCount = 1,
@@ -114,14 +117,12 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         pVertexAttributeDescriptions = &VERTEX_ATTRIBUTES[0],
     }
 
-    // Input assembly
     inputAssembly := vk.PipelineInputAssemblyStateCreateInfo{
         sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         topology = .TRIANGLE_LIST,
         primitiveRestartEnable = false,
     }
 
-    // Viewport and scissor
     viewport := vk.Viewport{
         x = 0,
         y = 0,
@@ -144,7 +145,6 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         pScissors = &scissor,
     }
 
-    // Rasterizer
     rasterizer := vk.PipelineRasterizationStateCreateInfo{
         sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         depthClampEnable = false,
@@ -156,14 +156,12 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         depthBiasEnable = false,
     }
 
-    // Multisampling
     multisampling := vk.PipelineMultisampleStateCreateInfo{
         sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         sampleShadingEnable = false,
         rasterizationSamples = {._1}, 
     }
 
-    // Depth and stencil testing
     depthStencil := vk.PipelineDepthStencilStateCreateInfo{
         sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         depthTestEnable = true,
@@ -173,7 +171,6 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         stencilTestEnable = false,
     }
 
-    // Color blending
     colorBlendAttachment := vk.PipelineColorBlendAttachmentState{
         colorWriteMask = {.R, .G, .B, .A},
         blendEnable = false,
@@ -188,7 +185,6 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         blendConstants = {0, 0, 0, 0},
     }
 
-    // Create the pipeline
     pipelineInfo := vk.GraphicsPipelineCreateInfo{
         sType = .GRAPHICS_PIPELINE_CREATE_INFO,
         stageCount = cast(u32)len(shaderStages),

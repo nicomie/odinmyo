@@ -4,6 +4,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:mem"
 import vk "vendor:vulkan"
+import "core:fmt"
 
 MOVE_SPEED :: 30.0
 
@@ -11,6 +12,9 @@ CameraSystem :: struct {
     cameras: [CameraType]Camera,
     active_camera_type: CameraType,
     previous_camera_type: CameraType,  
+    descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+    uniformBuffers: []Buffer,
+    uniformBuffersMapped: []rawptr,
 }
 
 camera_system_init :: proc(system: ^CameraSystem) {
@@ -22,7 +26,7 @@ camera_system_add :: proc(system: ^CameraSystem, camera: Camera) {
     system.cameras[camera.type] = camera
 }
 
-camera_system_toggle :: proc(ctx: ^ResourceContext, system: ^CameraSystem, target_type: CameraType) {
+camera_system_toggle :: proc(system: ^CameraSystem, target_type: CameraType) {
     if (target_type == .Player) {
         //system.cameras[.Player].position = ctx.meshes[0].
     }
@@ -70,6 +74,18 @@ CameraType :: enum {
     Orbit,
 }
 
+freeCameras :: proc(ctx: ^Context) {
+    using ctx.vulkan
+    sys := ctx.scene.cameraSystem
+
+
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        destroyBuffer(fmt.tprintf("ubo%d", i), device, sys.uniformBuffers[i])
+    }
+    delete(sys.uniformBuffers)
+    delete(sys.uniformBuffersMapped)
+    
+}
 
 initCamera :: proc(using ctx: ^Context) {
     using ctx.sc
