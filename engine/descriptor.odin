@@ -3,6 +3,8 @@ package engine
 import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
+import "core:mem"
+
 
 VERTEX_BINDING := vk.VertexInputBindingDescription{
     binding = 0,
@@ -46,6 +48,7 @@ createDescriptorSetLayouts :: proc(using ctx: ^Context) {
 
     materialSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
         {binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}}, 
+        {binding = 1, type = .UNIFORM_BUFFER, shaderStageFlags = {.FRAGMENT}}
     })
 
 
@@ -167,6 +170,25 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
 
         checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &mat.descriptorSets[0]))
 
+        bufferSize := cast(vk.DeviceSize)size_of(MaterialUBO)
+
+        mat.materialUBO = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
+        mat.materialUBOMapped = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
+
+        for i in 0..<MAX_FRAMES_IN_FLIGHT {
+            createBuffer(ctx, bufferSize, {.UNIFORM_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, 
+                &mat.materialUBO[i], fmt.tprintf("material ubo%d", i))
+            vk.MapMemory(device, mat.materialUBO[i].memory, 0, bufferSize, {}, &mat.materialUBOMapped[i])
+
+            ubo: MaterialUBO
+            ubo.color = mat.baseColorFactor
+
+            fmt.printf("should use color: %d\n", mat.baseColorTexIndex != nil)
+            ubo.params = mat.baseColorTexIndex != nil ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
+
+            mem.copy(mat.materialUBOMapped[i], &ubo, size_of(ubo))
+        }
+
         for i in 0..<MAX_FRAMES_IN_FLIGHT {
             imageInfo := vk.DescriptorImageInfo{
                 imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -174,17 +196,31 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
                 sampler     = rm.textures[0].sampler,
             }
 
-            write := vk.WriteDescriptorSet{
+            bufferInfo := vk.DescriptorBufferInfo{
+                buffer = mat.materialUBO[i].buffer,
+                offset = 0,
+                range  = size_of(MaterialUBO),
+            }
+
+            writes := []vk.WriteDescriptorSet{     
+            {
                 sType           = .WRITE_DESCRIPTOR_SET,
                 dstSet          = mat.descriptorSets[i],
                 dstBinding      = 0,
-                dstArrayElement = 0,
                 descriptorType  = .COMBINED_IMAGE_SAMPLER,
                 descriptorCount = 1,
                 pImageInfo      = &imageInfo,
+            },
+               {
+                sType           = .WRITE_DESCRIPTOR_SET,
+                dstSet          = mat.descriptorSets[i],
+                dstBinding      = 1,
+                descriptorType  = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo      = &bufferInfo,
             }
-
-            vk.UpdateDescriptorSets(device, 1, &write, 0, nil)
+        }
+            vk.UpdateDescriptorSets(device, cast(u32)len(writes), &writes[0], 0, nil)
         }
     }
 }

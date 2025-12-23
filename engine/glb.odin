@@ -30,7 +30,18 @@ Material :: struct {
     metallicRoughnessTexIndex: ^cgltf.texture,
     normalTexIndex: ^cgltf.texture,
 
+    alphaMode: cgltf.alpha_mode,
+    alphaCutoff: f32,
+    doubleSided: b32,
+
     descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+    materialUBO: []Buffer,
+    materialUBOMapped: []rawptr
+}
+
+MaterialUBO :: struct {
+    color: Vec4,
+    params : Vec4
 }
 
 Texture :: struct {
@@ -132,11 +143,17 @@ processSingleMaterial :: proc(gm: ^cgltf.material, index: int) -> Material {
 
         if pbr.base_color_texture != {} && pbr.base_color_texture.texture != {} {
             m.baseColorTexIndex = pbr.base_color_texture.texture
+
+            m.alphaMode = gm.alpha_mode
+            m.alphaCutoff = gm.alpha_cutoff
+            m.doubleSided = gm.double_sided
         }
         
         if pbr.metallic_roughness_texture != {} && pbr.metallic_roughness_texture.texture != {} {
             m.metallicRoughnessTexIndex = pbr.metallic_roughness_texture.texture
         }
+
+      
     }
 
     if gm.normal_texture != {} && gm.normal_texture.texture != {} {
