@@ -162,7 +162,7 @@ initVulkan :: proc(using ctx: ^Context) {
     createPipelineLayouts(ctx)
     createCommandPool(ctx)
     createPipelines(ctx)
-    setupGlb(ctx, "glbs/CesiumMilkTruck/CesiumMilkTruck.gltf")
+    setupGlb(ctx, "glbs/glTF-Sample-Models/2.0/Lantern/glTF/Lantern.gltf")
     createColorResources(ctx)
     createDepthResource(ctx)
     createIdResource(ctx)
@@ -192,9 +192,6 @@ initVulkan :: proc(using ctx: ^Context) {
 
     bool := AddUI(ctx)
     createUiDescriptorSets(ctx)
-
-
-
 
     //createIdDescriptorSets(ctx)
     createSyncObjects(ctx)
@@ -233,13 +230,20 @@ exit :: proc(using ctx: ^Context) {
     // --- Buffers ---
     freeCameras(ctx)
 
+    for &mat in materials{
+        for i in 0..<MAX_FRAMES_IN_FLIGHT {
+            destroyBuffer(fmt.tprintf("material-ubo%d", i), device, mat.materialUBO[i])
+        }
+        delete(mat.materialUBO)
+        delete(mat.materialUBOMapped)
+    }
+ 
+
     // for mesh in meshes {
     for &mesh in meshes {
         destroyBuffer("vBuffer", device, mesh.vertexBuffer^)
         destroyBuffer("iBuffer", device, mesh.indexBuffer^)
     }
-   
-    
 
     for el in ui.elements {
         destroyBuffer("meshVertex", device, ui.elements[0].vertex_buffer^)      

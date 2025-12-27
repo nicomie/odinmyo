@@ -17,5 +17,5 @@ void main() {
 
     outColor = useTexture
         ? texColor
-        : vec4(1.0,1.0,1.0,1.0);
+        : material.color;
 }
