@@ -9,13 +9,17 @@ import "core:math/linalg"
 import "core:math"
 
 
-Buffer :: struct
-{
+Buffer :: struct{
 	buffer: vk.Buffer,
 	memory: vk.DeviceMemory,
 	length: int,
 	size:   vk.DeviceSize,
     mapped_ptr: rawptr
+}
+
+
+FrameBuffer :: struct{
+	buffer: []Buffer,
 }
 
 createBuffer :: proc(

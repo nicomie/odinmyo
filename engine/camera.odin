@@ -13,7 +13,7 @@ CameraSystem :: struct {
     active_camera_type: CameraType,
     previous_camera_type: CameraType,  
     descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-    uniformBuffers: []Buffer,
+    uniformBuffers: FrameBuffer,
 }
 
 camera_system_init :: proc(system: ^CameraSystem) {
@@ -79,9 +79,9 @@ freeCameras :: proc(ctx: ^Context) {
 
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        destroyBuffer(fmt.tprintf("ubo%d", i), device, sys.uniformBuffers[i])
+        destroyBuffer(fmt.tprintf("ubo%d", i), device, sys.uniformBuffers.buffer[i])
     }
-    delete(sys.uniformBuffers)
+    delete(sys.uniformBuffers.buffer)
     
 }
 

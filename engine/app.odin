@@ -90,11 +90,13 @@ IdPipelineContext :: struct {
 
 SceneContext :: struct {
     cameraSystem: CameraSystem,
+    lightning: LightningSystem,
     ray: Ray,
     toggleHover: bool,
     isPlayer: bool,
     mesh: Mesh,
 }
+
 
 Context :: struct {
     platform: PlatformContext,

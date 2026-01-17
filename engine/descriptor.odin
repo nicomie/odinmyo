@@ -117,9 +117,9 @@ createGlobalDescriptorSets :: proc(using ctx: ^Context) {
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         bufferInfo := vk.DescriptorBufferInfo{
-            buffer = cameraSystem.uniformBuffers[i].buffer,
+            buffer = cameraSystem.uniformBuffers.buffer[i].buffer,
             offset = 0,
-            range = size_of(ViewProjection),
+            range = size_of(CameraUBO),
         }
 
         globalDescriptorWrites := []vk.WriteDescriptorSet{
@@ -296,9 +296,9 @@ createIdDescriptorSets :: proc(using ctx: ^Context) {
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         bufferInfo := vk.DescriptorBufferInfo{
-            buffer = ctx.scene.cameraSystem.uniformBuffers[i].buffer,
+            buffer = ctx.scene.cameraSystem.uniformBuffers.buffer[i].buffer,
             offset = 0,
-            range = size_of(ViewProjection),
+            range = size_of(CameraUBO),
         }
 
         idDescriptorWrites := []vk.WriteDescriptorSet{
