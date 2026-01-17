@@ -119,7 +119,7 @@ createGlobalDescriptorSets :: proc(using ctx: ^Context) {
         bufferInfo := vk.DescriptorBufferInfo{
             buffer = cameraSystem.uniformBuffers[i].buffer,
             offset = 0,
-            range = size_of(UBO),
+            range = size_of(ViewProjection),
         }
 
         globalDescriptorWrites := []vk.WriteDescriptorSet{
@@ -173,12 +173,11 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
         bufferSize := cast(vk.DeviceSize)size_of(MaterialUBO)
 
         mat.materialUBO = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
-        mat.materialUBOMapped = make([]rawptr, MAX_FRAMES_IN_FLIGHT)
 
         for i in 0..<MAX_FRAMES_IN_FLIGHT {
             createBuffer(ctx, bufferSize, {.UNIFORM_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, 
                 &mat.materialUBO[i], fmt.tprintf("material ubo%d", i))
-            vk.MapMemory(device, mat.materialUBO[i].memory, 0, bufferSize, {}, &mat.materialUBOMapped[i])
+            vk.MapMemory(device, mat.materialUBO[i].memory, 0, bufferSize, {}, &mat.materialUBO[i].mapped_ptr)
 
             ubo: MaterialUBO
             ubo.color = mat.baseColorFactor
@@ -186,7 +185,7 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
             fmt.printf("should use color: %d\n", mat.baseColorTexIndex != nil)
             ubo.params = mat.baseColorTexIndex != nil ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
 
-            mem.copy(mat.materialUBOMapped[i], &ubo, size_of(ubo))
+            mem.copy(mat.materialUBO[i].mapped_ptr, &ubo, size_of(ubo))
         }
 
         for i in 0..<MAX_FRAMES_IN_FLIGHT {
@@ -299,7 +298,7 @@ createIdDescriptorSets :: proc(using ctx: ^Context) {
         bufferInfo := vk.DescriptorBufferInfo{
             buffer = ctx.scene.cameraSystem.uniformBuffers[i].buffer,
             offset = 0,
-            range = size_of(UBO),
+            range = size_of(ViewProjection),
         }
 
         idDescriptorWrites := []vk.WriteDescriptorSet{

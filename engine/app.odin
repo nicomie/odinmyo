@@ -235,7 +235,6 @@ exit :: proc(using ctx: ^Context) {
             destroyBuffer(fmt.tprintf("material-ubo%d", i), device, mat.materialUBO[i])
         }
         delete(mat.materialUBO)
-        delete(mat.materialUBOMapped)
     }
  
 

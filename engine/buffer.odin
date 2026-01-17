@@ -15,6 +15,7 @@ Buffer :: struct
 	memory: vk.DeviceMemory,
 	length: int,
 	size:   vk.DeviceSize,
+    mapped_ptr: rawptr
 }
 
 createBuffer :: proc(

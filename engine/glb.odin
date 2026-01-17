@@ -36,7 +36,6 @@ Material :: struct {
 
     descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
     materialUBO: []Buffer,
-    materialUBOMapped: []rawptr
 }
 
 MaterialUBO :: struct {
