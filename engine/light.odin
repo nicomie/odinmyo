@@ -39,5 +39,31 @@ init_lightning :: proc(ctx: ^Context) {
         intensity = 0.8,
     }
 
-    addA
+}
+
+add_directional_light :: proc(ctx: ^Context, light: Light) {
+    system := &ctx.scene.lightning
+
+    if (system.data.lightCount < 32) {
+        system.data.lights[system.data.lightCount] = light
+        system.data.lightCount += 1
+    }
+}
+
+add_point_light :: proc(ctx: ^Context, pos: Vec3, color: Vec3, intensity: f32) {
+    system := &ctx.scene.lightning
+
+    if (system.data.lightCount < 32) {
+        light := Light{
+            position = pos,
+            type = .POINT,
+            color = color,
+            intensity = intensity
+        }
+
+        append(&system.point_lights, light)
+
+        system.data.lights[system.data.lightCount] = light
+        system.data.lightCount += 1
+    }
 }

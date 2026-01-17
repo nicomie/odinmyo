@@ -252,7 +252,7 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["mesh"])
 
     vk.CmdBindDescriptorSets(buffer, vk.PipelineBindPoint.GRAPHICS,meshPipelineLayout, 
-                        0, 1, &cameraSystem.descriptorSets[currentFrame], 0, nil);
+                        0, 1, &descriptorSets[currentFrame], 0, nil);
 
                     
 

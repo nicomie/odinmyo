@@ -72,8 +72,6 @@ MeshObject :: struct {
 }
 
 cgltf_material_index :: proc(data: ^cgltf.data, m: ^cgltf.material) -> int {
-
-
     for i in 0..<len(data.materials) {
         if &data.materials[i] == m {
                      fmt.printf("hit for %v against %v \n", m.name, data.materials[i].name)
@@ -83,8 +81,6 @@ cgltf_material_index :: proc(data: ^cgltf.data, m: ^cgltf.material) -> int {
             fmt.printf("no hit for %v against %v \n", m.name, data.materials[i])
 
         }
-           
-        
     }
     return -1
 }
@@ -476,10 +472,9 @@ processPrimitive :: proc(p: cgltf.primitive) -> ([]Vertex, []u32) {
                     if j >= len(vertices) {
                         append(&vertices, Vertex{color = {1.0, 1.0, 1.0}})
                     }
-                    // You could add normals to your Vertex struct if needed
-                    // normal: [3]f32
-                    // cgltf.accessor_read_float(accessor, j, &normal[0], 3)
-                    // vertices[j].normal = normal
+                    normal: [3]f32
+                    cgltf.accessor_read_float(accessor, j, &normal[0], 3)
+                    vertices[j].normal = normal
                 }
 
             case .color:

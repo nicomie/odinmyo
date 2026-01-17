@@ -28,6 +28,12 @@ VERTEX_ATTRIBUTES := [?]vk.VertexInputAttributeDescription{
     {
 		binding = 0,
 		location = 2,
+		format = .R32G32B32_SFLOAT,
+		offset = cast(u32)offset_of(Vertex, normals),
+	},
+    {
+		binding = 0,
+		location = 3,
 		format = .R32G32_SFLOAT,
 		offset = cast(u32)offset_of(Vertex, texCoord),
 	},
@@ -43,7 +49,8 @@ createDescriptorSetLayouts :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.pipe
     globalSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
-        {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX}}, 
+        {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX, .FRAGMENT}}, 
+        {binding = 1, type = .UNIFORM_BUFFER, shaderStageFlags = {.FRAGMENT}}, 
     })
 
     materialSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
@@ -122,15 +129,28 @@ createGlobalDescriptorSets :: proc(using ctx: ^Context) {
             range = size_of(CameraUBO),
         }
 
+        lightInfo := vk.DescriptorBufferInfo{
+            buffer = scene.lightning.ubo.buffer[i].buffer,
+            offset = 0,
+            range = size_of(LightUBO),
+        }
+
         globalDescriptorWrites := []vk.WriteDescriptorSet{
             {
                 sType = .WRITE_DESCRIPTOR_SET,
-                dstSet = cameraSystem.descriptorSets[i],
+                dstSet = descriptorSets[i],
                 dstBinding = 0,
-                dstArrayElement = 0,
                 descriptorType = .UNIFORM_BUFFER,
                 descriptorCount = 1,
                 pBufferInfo = &bufferInfo,
+            },
+            {
+                sType = .WRITE_DESCRIPTOR_SET,
+                dstSet = descriptorSets[i],
+                dstBinding = 1,
+                descriptorType = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo = &lightInfo,
             }
         }
 
@@ -145,8 +165,6 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
     fmt.println("=== Starting createMaterialDescriptorSets ===")
     fmt.printf("Number of materials: %d\n", len(rm.materials))
     fmt.printf("Number of textures: %d\n", len(rm.textures))
-
-
 
     for &mat, matIdx in rm.materials {
                 
@@ -323,7 +341,7 @@ createDescriptorPool :: proc(using ctx: ^Context) {
     poolSizes := []vk.DescriptorPoolSize{
         {
             type = .UNIFORM_BUFFER,
-            descriptorCount = MAX_FRAMES_IN_FLIGHT*3
+            descriptorCount = MAX_FRAMES_IN_FLIGHT*20
         },
         {
             type = .COMBINED_IMAGE_SAMPLER,

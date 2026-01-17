@@ -13,6 +13,11 @@ CameraUBO :: struct{
     proj: linalg.Matrix4f32,
 }
 
+GlobalUBO :: struct{
+    camera: CameraUBO,
+    lightning: LightUBO,
+}
+
 createUniformBuffers :: proc(using ctx: ^Context) {
 
     initFrameBuffer(ctx, &ctx.scene.cameraSystem.uniformBuffers, CameraUBO)
@@ -40,6 +45,7 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     using ctx.scene
         
     camera := camera_system_get_active(&cameraSystem)
+    lightning = scene.lightning
 
     ubo: CameraUBO = {
         view = camera.view,
@@ -47,4 +53,5 @@ updateUniformBuffer :: proc(using ctx: ^Context, currentImage: u32) {
     }
 
     mem.copy(cameraSystem.uniformBuffers.buffer[currentImage].mapped_ptr, &ubo, size_of(ubo))
+    mem.copy(scene.lightning.ubo.buffer[currentImage].mapped_ptr, &ubo, size_of(LightUBO))
 }

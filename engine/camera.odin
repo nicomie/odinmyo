@@ -12,7 +12,6 @@ CameraSystem :: struct {
     cameras: [CameraType]Camera,
     active_camera_type: CameraType,
     previous_camera_type: CameraType,  
-    descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
     uniformBuffers: FrameBuffer,
 }
 
@@ -132,7 +131,7 @@ initCamera :: proc(using ctx: ^Context) {
         0.1,                     
         100.0,                   
     )
-    free_camera.projection[1][1] *= -1  
+    free_camera.projection[1][1] *= -1
 
     player_camera.projection = free_camera.projection
 
