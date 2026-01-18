@@ -14,10 +14,19 @@ initWindow :: proc (ctx: ^Context) {
         fmt.eprintln("sdl_Init failed: ", sdl.GetError())
         return
     }
+    fmt.eprintln("Failed to create window: ", sdl.GetError())
 
-    // Create window
+
+    sdl.Vulkan_LoadLibrary(nil)
+    fmt.eprintln("Failed to create window: ", sdl.GetError())
+
+
     sdlWindow := sdl.CreateWindow("Odin Vulkan Engine", sdl.WINDOWPOS_UNDEFINED, 
     sdl.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, {.VULKAN, .RESIZABLE})
+
+
+    // Create window
+
 
     fmt.println(window)
     if sdlWindow == nil {

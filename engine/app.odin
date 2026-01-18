@@ -90,11 +90,13 @@ IdPipelineContext :: struct {
 
 SceneContext :: struct {
     cameraSystem: CameraSystem,
+    lightning: LightningSystem,
     ray: Ray,
     toggleHover: bool,
     isPlayer: bool,
     mesh: Mesh,
 }
+
 
 Context :: struct {
     platform: PlatformContext,
@@ -107,6 +109,7 @@ Context :: struct {
     ui: UIContext,
 
     frames: [MAX_FRAMES_IN_FLIGHT]FrameContext,
+    descriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
     currentFrame :u32,
     framebufferResized :bool,  
 }
@@ -118,9 +121,10 @@ Ray :: struct {
 }
 
 Vertex :: struct{
-    pos: [3]f32,
-    color: [3]f32,
-    texCoord: [2]f32,
+    pos: Vec3,
+    color: Vec3,
+    normals: Vec3,
+    texCoord: Vec2,
 }
 
 initVulkan :: proc(using ctx: ^Context) {
@@ -162,7 +166,7 @@ initVulkan :: proc(using ctx: ^Context) {
     createPipelineLayouts(ctx)
     createCommandPool(ctx)
     createPipelines(ctx)
-    setupGlb(ctx, "glbs/glTF-Sample-Models/2.0/Lantern/glTF/Lantern.gltf")
+    setupGlb(ctx, "glbs/SciFiHelmet/glTF/SciFiHelmet.gltf")
     createColorResources(ctx)
     createDepthResource(ctx)
     createIdResource(ctx)
@@ -385,6 +389,7 @@ main :: proc() {
     initContext(&ctx)
     initVulkan(&ctx)
     initCamera(&ctx)
+    init_lightning(&ctx)
     run(&ctx)  
     exit(&ctx)
 }

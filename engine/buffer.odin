@@ -9,13 +9,17 @@ import "core:math/linalg"
 import "core:math"
 
 
-Buffer :: struct
-{
+Buffer :: struct{
 	buffer: vk.Buffer,
 	memory: vk.DeviceMemory,
 	length: int,
 	size:   vk.DeviceSize,
     mapped_ptr: rawptr
+}
+
+
+FrameBuffer :: struct{
+	buffer: []Buffer,
 }
 
 createBuffer :: proc(
@@ -248,7 +252,7 @@ recordCommandBuffer :: proc(using ctx: ^Context, buffer: vk.CommandBuffer, image
     vk.CmdBindPipeline(buffer, .GRAPHICS, pipelines["mesh"])
 
     vk.CmdBindDescriptorSets(buffer, vk.PipelineBindPoint.GRAPHICS,meshPipelineLayout, 
-                        0, 1, &cameraSystem.descriptorSets[currentFrame], 0, nil);
+                        0, 1, &descriptorSets[currentFrame], 0, nil);
 
                     
 

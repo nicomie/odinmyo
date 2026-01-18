@@ -22,8 +22,22 @@ create_instance :: proc(using ctx: ^Context) {
     createInfo.pApplicationInfo = &appInfo
 
     sdl2_extensions := get_sdlExtensions(window)
-    createInfo.enabledExtensionCount = cast(u32)len(sdl2_extensions)
-    createInfo.ppEnabledExtensionNames = raw_data(sdl2_extensions)
+    allExtensions := make([dynamic]cstring)
+    for el in sdl2_extensions {
+        when ODIN_OS == .Darwin {
+            if el != cstring("VK_KHR_display") {
+                append_elem(&allExtensions, el)
+            } 
+        }
+    }
+    when ODIN_OS == .Darwin {
+        append_elem(&allExtensions, cstring("VK_KHR_portability_enumeration"))
+        append_elem(&allExtensions, cstring("VK_KHR_get_physical_device_properties2"))
+    }
+
+    createInfo.enabledExtensionCount = cast(u32)len(allExtensions)
+    createInfo.ppEnabledExtensionNames = &allExtensions[0]
+    createInfo.flags = {.ENUMERATE_PORTABILITY_KHR}
 
     debugCreateInfo: vk.DebugUtilsMessengerCreateInfoEXT
     when ODIN_DEBUG {

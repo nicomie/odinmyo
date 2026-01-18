@@ -28,6 +28,12 @@ VERTEX_ATTRIBUTES := [?]vk.VertexInputAttributeDescription{
     {
 		binding = 0,
 		location = 2,
+		format = .R32G32B32_SFLOAT,
+		offset = cast(u32)offset_of(Vertex, normals),
+	},
+    {
+		binding = 0,
+		location = 3,
 		format = .R32G32_SFLOAT,
 		offset = cast(u32)offset_of(Vertex, texCoord),
 	},
@@ -43,7 +49,8 @@ createDescriptorSetLayouts :: proc(using ctx: ^Context) {
     using ctx.vulkan
     using ctx.pipe
     globalSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
-        {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX}}, 
+        {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX, .FRAGMENT}}, 
+        {binding = 1, type = .UNIFORM_BUFFER, shaderStageFlags = {.FRAGMENT}}, 
     })
 
     materialSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
@@ -117,20 +124,33 @@ createGlobalDescriptorSets :: proc(using ctx: ^Context) {
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         bufferInfo := vk.DescriptorBufferInfo{
-            buffer = cameraSystem.uniformBuffers[i].buffer,
+            buffer = cameraSystem.uniformBuffers.buffer[i].buffer,
             offset = 0,
-            range = size_of(ViewProjection),
+            range = size_of(CameraUBO),
+        }
+
+        lightInfo := vk.DescriptorBufferInfo{
+            buffer = scene.lightning.ubo.buffer[i].buffer,
+            offset = 0,
+            range = size_of(LightUBO),
         }
 
         globalDescriptorWrites := []vk.WriteDescriptorSet{
             {
                 sType = .WRITE_DESCRIPTOR_SET,
-                dstSet = cameraSystem.descriptorSets[i],
+                dstSet = descriptorSets[i],
                 dstBinding = 0,
-                dstArrayElement = 0,
                 descriptorType = .UNIFORM_BUFFER,
                 descriptorCount = 1,
                 pBufferInfo = &bufferInfo,
+            },
+            {
+                sType = .WRITE_DESCRIPTOR_SET,
+                dstSet = descriptorSets[i],
+                dstBinding = 1,
+                descriptorType = .UNIFORM_BUFFER,
+                descriptorCount = 1,
+                pBufferInfo = &lightInfo,
             }
         }
 
@@ -145,8 +165,6 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
     fmt.println("=== Starting createMaterialDescriptorSets ===")
     fmt.printf("Number of materials: %d\n", len(rm.materials))
     fmt.printf("Number of textures: %d\n", len(rm.textures))
-
-
 
     for &mat, matIdx in rm.materials {
                 
@@ -182,8 +200,8 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
             ubo: MaterialUBO
             ubo.color = mat.baseColorFactor
 
-            fmt.printf("should use color: %d\n", mat.baseColorTexIndex != nil)
-            ubo.params = mat.baseColorTexIndex != nil ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
+            fmt.printf("should use color: %d\n", mat.baseColorTexIdx != -1)
+            ubo.params = mat.baseColorTexIdx == -1 ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
 
             mem.copy(mat.materialUBO[i].mapped_ptr, &ubo, size_of(ubo))
         }
@@ -191,8 +209,8 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
         for i in 0..<MAX_FRAMES_IN_FLIGHT {
             imageInfo := vk.DescriptorImageInfo{
                 imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-                imageView   = rm.textures[0].view,
-                sampler     = rm.textures[0].sampler,
+                imageView   = rm.textures[mat.normalTexIdx].view,
+                sampler     = rm.textures[mat.normalTexIdx].sampler,
             }
 
             bufferInfo := vk.DescriptorBufferInfo{
@@ -296,9 +314,9 @@ createIdDescriptorSets :: proc(using ctx: ^Context) {
 
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
         bufferInfo := vk.DescriptorBufferInfo{
-            buffer = ctx.scene.cameraSystem.uniformBuffers[i].buffer,
+            buffer = ctx.scene.cameraSystem.uniformBuffers.buffer[i].buffer,
             offset = 0,
-            range = size_of(ViewProjection),
+            range = size_of(CameraUBO),
         }
 
         idDescriptorWrites := []vk.WriteDescriptorSet{
@@ -323,7 +341,7 @@ createDescriptorPool :: proc(using ctx: ^Context) {
     poolSizes := []vk.DescriptorPoolSize{
         {
             type = .UNIFORM_BUFFER,
-            descriptorCount = MAX_FRAMES_IN_FLIGHT*3
+            descriptorCount = MAX_FRAMES_IN_FLIGHT*20
         },
         {
             type = .COMBINED_IMAGE_SAMPLER,

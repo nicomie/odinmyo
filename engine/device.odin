@@ -40,7 +40,7 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
         score += cast(int)props.limits.maxImageDimension2D
 
         if !features.fillModeNonSolid do return 0
-        if !features.geometryShader do return 0
+        when ODIN_OS == .Darwin do if !features.geometryShader do return 0
 		if !checkDeviceExtensionSupport(dev) do return 0
         if !features.samplerAnisotropy do return 0
 

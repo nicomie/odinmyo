@@ -15,7 +15,7 @@ ResourceManager :: struct {
     meshes: [dynamic]Mesh,
     materials: []Material,
     materialLookup: map[^cgltf.material]int,
-    textures: []^Texture,
+    textures: [dynamic]^Texture,
     meshObjects: [dynamic]MeshObject,
 }
 
@@ -26,9 +26,9 @@ Material :: struct {
     metallicFactor: f32,
     roughnessFactor: f32,
 
-    baseColorTexIndex: ^cgltf.texture,
-    metallicRoughnessTexIndex: ^cgltf.texture,
-    normalTexIndex: ^cgltf.texture,
+    baseColorTexIdx: int,
+    metallicRoughnessTexIdx: int,
+    normalTexIdx: int,
 
     alphaMode: cgltf.alpha_mode,
     alphaCutoff: f32,
@@ -72,8 +72,6 @@ MeshObject :: struct {
 }
 
 cgltf_material_index :: proc(data: ^cgltf.data, m: ^cgltf.material) -> int {
-
-
     for i in 0..<len(data.materials) {
         if &data.materials[i] == m {
                      fmt.printf("hit for %v against %v \n", m.name, data.materials[i].name)
@@ -83,8 +81,6 @@ cgltf_material_index :: proc(data: ^cgltf.data, m: ^cgltf.material) -> int {
             fmt.printf("no hit for %v against %v \n", m.name, data.materials[i])
 
         }
-           
-        
     }
     return -1
 }
@@ -120,18 +116,18 @@ loadTextureFromImage :: proc(ctx: ^Context, img: ^cgltf.image, data: ^cgltf.data
 }
 
 
-processSingleMaterial :: proc(gm: ^cgltf.material, index: int) -> Material {
-    m := Material{}
-    
-    m.baseColorFactor = {1.0, 1.0, 1.0, 1.0}
-    m.metallicFactor = 1.0
-    m.roughnessFactor = 1.0
-    
-    // Get name from the actual material pointer
-    if gm.name != nil {
-        m.name = strings.clone(string(gm.name))
-    } else {
-        m.name = fmt.tprintf("material_%d", index)
+processSingleMaterial :: proc(data: ^cgltf.data, gm: ^cgltf.material, index: int) -> Material {
+    m := Material{
+        name = gm.name != nil ? strings.clone(string(gm.name)) : fmt.tprintf("material_%p", gm),
+        baseColorFactor = {1.0, 1.0, 1.0, 1.0},
+        metallicFactor = 1.0,
+        roughnessFactor = 1.0,
+        baseColorTexIdx = -1,
+        metallicRoughnessTexIdx = -1,
+        normalTexIndex = -1,
+        alphaMode = gm.alpha_mode,
+        alphaCutoff = gm.alpha_cutoff,
+        doubleSided = gm.double_sided != 0,
     }
 
     if gm.has_pbr_metallic_roughness {
@@ -140,23 +136,31 @@ processSingleMaterial :: proc(gm: ^cgltf.material, index: int) -> Material {
         m.metallicFactor = pbr.metallic_factor 
         m.roughnessFactor = pbr.roughness_factor
 
-        if pbr.base_color_texture != {} && pbr.base_color_texture.texture != {} {
-            m.baseColorTexIndex = pbr.base_color_texture.texture
+        if pbr.base_color_texture.texture != nil {
+            texIndex := findTextureIndex(data, pbr.base_color_texture.texture)
 
-            m.alphaMode = gm.alpha_mode
-            m.alphaCutoff = gm.alpha_cutoff
-            m.doubleSided = gm.double_sided
+            if texIndex >= 0 && texIndex < len(rm.textures) {
+                m.baseColorTexIdx = texIndex
+                fmt.printf("Material '%s': baseColorTexIndex = %d\n", m.name, texIndex)
+            }
+   
         }
         
-        if pbr.metallic_roughness_texture != {} && pbr.metallic_roughness_texture.texture != {} {
-            m.metallicRoughnessTexIndex = pbr.metallic_roughness_texture.texture
+        if pbr.metallic_roughness_texture.texture != nil {
+            texIndex := findTextureIndex(data, pbr.metallic_roughness_texture.texture)
+            if texIndex >= 0 && texIndex < len(rm.textures) {
+                m.metallicRoughnessTexIdx = texIndex
+                fmt.printf("Material '%s': metallicRoughnessTexIndex = %d\n", m.name, texIndex)
+            }
         }
-
-      
     }
 
-    if gm.normal_texture != {} && gm.normal_texture.texture != {} {
-        m.normalTexIndex = gm.normal_texture.texture
+    if gm.normal_texture.texture != nil {
+        texIndex := findTextureIndex(data, gm.normal_texture.texture)
+        if texIndex >= 0 {
+            m.normalTexIdx = texIndex
+            fmt.printf("Material '%s': normalTexIndex = %d\n", m.name, texIndex)
+        }
     }
 
     return m
@@ -344,7 +348,7 @@ processAllMaterials :: proc(rm: ^ResourceManager, data: ^cgltf.data) {
     
     j := 0
     for material, _ in unique_materials {
-        m := processSingleMaterial(material, j)
+        m := processSingleMaterial(data, material, j)
         rm.materials[j] = m
         rm.materialLookup[material] = j
         j += 1
@@ -355,9 +359,7 @@ loadAllTextures :: proc(using ctx: ^Context, data: ^cgltf.data, path: string) {
     using ctx.resource
     
     fmt.printf("Loading %d textures...\n", len(data.images))
-    
-    // Create array for all textures
-    textures = make([]^Texture, len(data.images))
+
     
     for i in 0..<len(data.images) {
         image := data.images[i]
@@ -374,7 +376,7 @@ loadAllTextures :: proc(using ctx: ^Context, data: ^cgltf.data, path: string) {
         
         // Create texture with correct index
         fmt.println("File exists, proceeding with texture creation...")
-        textures[i] = createTextureFromFile(ctx, texturePath, i)
+        append(&resource.textures, createTextureFromFile(ctx, texturePath, i))
     }
 }
 
@@ -387,46 +389,6 @@ createTextureFromFile :: proc(using ctx: ^Context, path: string, textureIndex: i
       fmt.println("here")
 
     return texture
-}
-
-processMaterials :: proc(rm: ^ResourceManager, data: ^cgltf.data, ctx: ^Context) -> []Material {
-    if data == nil || data.materials == nil do return make([]Material, 0)
-    materials := make([]Material, len(data.materials))
-
-    for i in 0..<len(data.materials) {
-        gm := &data.materials[i]
-        m := Material{}
-        
-        m.baseColorFactor = {1.0, 1.0, 1.0, 1.0}
-        m.metallicFactor = 1.0
-        m.roughnessFactor = 1.0
-        
-        m.name = strings.clone_from_cstring(gm.name) if gm.name != nil else fmt.tprintf("material_%d", i)
-        fmt.printf("Material: %s\n", m.name)
-
-        if gm.has_pbr_metallic_roughness {
-            pbr := gm.pbr_metallic_roughness
-            m.baseColorFactor = pbr.base_color_factor
-            m.metallicFactor = pbr.metallic_factor 
-            m.roughnessFactor = pbr.roughness_factor
-
-            if pbr.base_color_texture != {} && pbr.base_color_texture.texture != {} {
-                m.baseColorTexIndex = pbr.base_color_texture.texture
-            }
-            
-            if pbr.metallic_roughness_texture != {} && pbr.metallic_roughness_texture.texture != {} {
-                m.metallicRoughnessTexIndex = pbr.metallic_roughness_texture.texture
-            }
-        }
-
-        if gm.normal_texture != {} && gm.normal_texture.texture != {} {
-            m.normalTexIndex = gm.normal_texture.texture
-        }
-
-        materials[i] = m
-    }
-
-    return materials
 }
 
 findTextureIndex :: proc(data: ^cgltf.data, texture: ^cgltf.texture) -> int {
@@ -476,10 +438,9 @@ processPrimitive :: proc(p: cgltf.primitive) -> ([]Vertex, []u32) {
                     if j >= len(vertices) {
                         append(&vertices, Vertex{color = {1.0, 1.0, 1.0}})
                     }
-                    // You could add normals to your Vertex struct if needed
-                    // normal: [3]f32
-                    // cgltf.accessor_read_float(accessor, j, &normal[0], 3)
-                    // vertices[j].normal = normal
+                    normal: [3]f32
+                    res:=cgltf.accessor_read_float(accessor, j, &normal[0], 3)
+                    //vertices[j].normal = normal
                 }
 
             case .color:
