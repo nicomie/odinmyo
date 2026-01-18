@@ -123,7 +123,7 @@ Ray :: struct {
 Vertex :: struct{
     pos: Vec3,
     color: Vec3,
-    normals: Vec3
+    normals: Vec3,
     texCoord: Vec2,
 }
 

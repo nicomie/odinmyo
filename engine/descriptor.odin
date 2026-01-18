@@ -200,8 +200,8 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
             ubo: MaterialUBO
             ubo.color = mat.baseColorFactor
 
-            fmt.printf("should use color: %d\n", mat.baseColorTexIndex != nil)
-            ubo.params = mat.baseColorTexIndex != nil ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
+            fmt.printf("should use color: %d\n", mat.baseColorTexIdx != -1)
+            ubo.params = mat.baseColorTexIdx == -1 ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
 
             mem.copy(mat.materialUBO[i].mapped_ptr, &ubo, size_of(ubo))
         }
@@ -209,8 +209,8 @@ createMaterialDescriptorSets :: proc(using ctx: ^Context) {
         for i in 0..<MAX_FRAMES_IN_FLIGHT {
             imageInfo := vk.DescriptorImageInfo{
                 imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-                imageView   = rm.textures[0].view,
-                sampler     = rm.textures[0].sampler,
+                imageView   = rm.textures[mat.normalTexIdx].view,
+                sampler     = rm.textures[mat.normalTexIdx].sampler,
             }
 
             bufferInfo := vk.DescriptorBufferInfo{
