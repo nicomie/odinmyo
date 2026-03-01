@@ -74,22 +74,17 @@ CameraType :: enum {
 }
 
 freeCameras :: proc(ctx: ^Context) {
-    using ctx.vulkan
     sys := ctx.scene.cameraSystem
 
-
     for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        destroyBuffer(fmt.tprintf("ubo%d", i), device, sys.uniformBuffers[i])
+        destroyBuffer(fmt.tprintf("ubo%d", i), ctx.vulkan.device, sys.uniformBuffers[i])
     }
     delete(sys.uniformBuffers)
     
 }
 
-initCamera :: proc(using ctx: ^Context) {
-    using ctx.sc
-    using ctx.scene
-
-    camera_system_init(&cameraSystem)
+initCamera :: proc(ctx: ^Context) {
+    camera_system_init(&ctx.scene.cameraSystem)
 
     free_camera := Camera{
         type = .Free,
@@ -123,7 +118,7 @@ initCamera :: proc(using ctx: ^Context) {
     )
     }
 
-    aspect_ratio := f32(swapchain.extent.width) / f32(swapchain.extent.height)
+    aspect_ratio := f32(ctx.sc.swapchain.extent.width) / f32(ctx.sc.swapchain.extent.height)
     
     // Set projections for both cameras
     free_camera.projection = linalg.matrix4_perspective(
@@ -136,14 +131,14 @@ initCamera :: proc(using ctx: ^Context) {
 
     player_camera.projection = free_camera.projection
 
-    camera_system_add(&cameraSystem, free_camera)
-    camera_system_add(&cameraSystem, player_camera)
+    camera_system_add(&ctx.scene.cameraSystem, free_camera)
+    camera_system_add(&ctx.scene.cameraSystem, player_camera)
 
     // Initialize camera position
     updateCameraPosition(ctx)
 }
 
-updateCameraPosition :: proc(using ctx: ^Context) {
+updateCameraPosition :: proc(ctx: ^Context) {
     camera := camera_system_get_active(&ctx.scene.cameraSystem)
 
     q_yaw := linalg.quaternion_angle_axis_f32(-camera.yaw, Vec3{0, 1, 0})

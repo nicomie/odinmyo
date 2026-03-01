@@ -6,9 +6,7 @@ import "core:fmt"
 import "core:os"
 
 
-create_instance :: proc(using ctx: ^Context) {
-    using ctx.platform
-    using ctx.vulkan
+create_instance :: proc(ctx: ^Context) {
     appInfo: vk.ApplicationInfo
     appInfo.sType = .APPLICATION_INFO
     appInfo.pApplicationName = "Hello triangle"
@@ -21,7 +19,7 @@ create_instance :: proc(using ctx: ^Context) {
     createInfo.sType = .INSTANCE_CREATE_INFO
     createInfo.pApplicationInfo = &appInfo
 
-    sdl2_extensions := get_sdlExtensions(window)
+    sdl2_extensions := get_sdlExtensions(ctx.platform.window)
     createInfo.enabledExtensionCount = cast(u32)len(sdl2_extensions)
     createInfo.ppEnabledExtensionNames = raw_data(sdl2_extensions)
 
@@ -50,7 +48,7 @@ create_instance :: proc(using ctx: ^Context) {
 		createInfo.enabledLayerCount = 0;
         createInfo.pNext = nil
     }
-    if vk.CreateInstance(&createInfo, nil, &instance) != .SUCCESS {
+    if vk.CreateInstance(&createInfo, nil, &ctx.vulkan.instance) != .SUCCESS {
         fmt.eprintln("failed to create instance: ", sdl.GetError())
         return 
     }

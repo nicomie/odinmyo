@@ -8,15 +8,28 @@ import "base:runtime"
 VALIDATION_LAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation"};
 USE_VALIDATION_LAYERS :: ODIN_DEBUG
 
-debugCallback :: proc "cdecl" (
-    messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
-    messageTypes: vk.DebugUtilsMessageTypeFlagsEXT,
-    pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
-    pUserData: rawptr
-) -> b32 {
-    context = runtime.default_context()
-    fmt.printf("Vulkan Validation Layer Message: %s\n", string(pCallbackData.pMessage))
-    return false 
+when ODIN_OS == .Windows {
+    debugCallback :: proc "stdcall" (
+        severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+        types:    vk.DebugUtilsMessageTypeFlagsEXT,
+        data:     ^vk.DebugUtilsMessengerCallbackDataEXT,
+        user:     rawptr,
+    ) -> b32 {
+        context = runtime.default_context()
+        fmt.printf("Vulkan Validation Layer Message: %s\n", string(data.pMessage));
+        return false; 
+    }
+} else {
+    debugCallback :: proc "cdecl" (
+        severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+        types:    vk.DebugUtilsMessageTypeFlagsEXT,
+        data:     ^vk.DebugUtilsMessengerCallbackDataEXT,
+        user:     rawptr,
+    ) -> b32 {
+        context = runtime.default_context()
+        fmt.printf("Vulkan Validation Layer Message: %s\n", string(data.pMessage));
+        return false; 
+    }
 }
 
 CreateDebugUtilsMessengerEXT :: proc(
@@ -64,13 +77,12 @@ populate_debug_messenger :: proc(info: ^vk.DebugUtilsMessengerCreateInfoEXT){
     info.pfnUserCallback = debugCallback
 }
 
-setup_debug_messenger :: proc(using ctx: ^Context) {
-    using ctx.vulkan
+setup_debug_messenger :: proc(ctx: ^Context) {
     when ODIN_DEBUG {
         createInfo: vk.DebugUtilsMessengerCreateInfoEXT
         populate_debug_messenger(&createInfo)
 
-        if CreateDebugUtilsMessengerEXT(instance, &createInfo, nil, &debugMessenger) != .SUCCESS {
+        if CreateDebugUtilsMessengerEXT(ctx.vulkan.instance, &createInfo, nil, &ctx.vulkan.debugMessenger) != .SUCCESS {
             fmt.println("Failed to create debug utils messenger")
             return
         }

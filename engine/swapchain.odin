@@ -25,9 +25,9 @@ Swapchain :: struct {
     attachments: SwapchainAttachments,
 }
 
-querySwapChainSupport :: proc(target: vk.PhysicalDevice, using ctx: ^Context) -> SwapChainSupportDetails{
-    using ctx.vulkan
+querySwapChainSupport :: proc(target: vk.PhysicalDevice, ctx: ^Context) -> SwapChainSupportDetails{
     details: SwapChainSupportDetails
+    surface := ctx.vulkan.surface
     
     vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(target, surface, &details.capabilities)
 
@@ -67,13 +67,12 @@ chooseSwapPresentMode :: proc(modes: ^[]vk.PresentModeKHR) -> vk.PresentModeKHR 
     return .FIFO
 }
 
-chooseSwapExtent :: proc(using ctx: ^Context, capabilities: ^vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
-    using ctx.platform
+chooseSwapExtent :: proc(ctx: ^Context, capabilities: ^vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
     if capabilities.currentExtent.width != max(u32) {
         return capabilities.currentExtent
     } else {
     w,h : i32
-    sdl.GL_GetDrawableSize(window, &w, &h)
+    sdl.GL_GetDrawableSize(ctx.platform.window, &w, &h)
     extent := vk.Extent2D {
         width = cast(u32) w,
         height = cast(u32) h,
@@ -96,9 +95,12 @@ clamp :: proc(value, min, max: u32) -> u32  {
     return value;
 }  
 
-createSwapchain :: proc(using ctx: ^Context) {
-    using ctx.vulkan
-    using ctx.sc
+createSwapchain :: proc(ctx: ^Context) {
+    physicalDevice := ctx.vulkan.physicalDevice
+    device := ctx.vulkan.device
+    queueIndices := &ctx.vulkan.queueIndices
+    swapchain := &ctx.sc.swapchain
+
     swapChainSupport := querySwapChainSupport(physicalDevice, ctx)
 
     surfaceFormat := chooseSwapSurfaceFormat(&swapChainSupport.formats)
@@ -113,7 +115,7 @@ createSwapchain :: proc(using ctx: ^Context) {
 
     createInfo: vk.SwapchainCreateInfoKHR
     createInfo.sType = .SWAPCHAIN_CREATE_INFO_KHR
-    createInfo.surface = surface
+    createInfo.surface = ctx.vulkan.surface
     createInfo.minImageCount = swapchain.imageCount;
     createInfo.imageFormat = surfaceFormat.format;
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
@@ -151,14 +153,12 @@ createSwapchain :: proc(using ctx: ^Context) {
 
 }
 
-recreateSwapchain :: proc(using ctx: ^Context) {
-    using ctx.platform
-    using ctx.vulkan
-    windowSurface := sdl.GetWindowSurface(window)
+recreateSwapchain :: proc(ctx: ^Context) {
+    windowSurface := sdl.GetWindowSurface(ctx.platform.window)
     if (windowSurface.h == 0 || windowSurface.w == 0) {
-        sdl.GetWindowSurface(window)
+        sdl.GetWindowSurface(ctx.platform.window)
     }
-    vk.DeviceWaitIdle(device)
+    vk.DeviceWaitIdle(ctx.vulkan.device)
 
     cleanSwapchain(ctx)
 
@@ -170,10 +170,12 @@ recreateSwapchain :: proc(using ctx: ^Context) {
 
 }
 
-cleanSwapchain :: proc(using ctx: ^Context) {   
-    using ctx.vulkan
-    using ctx.sc
-
+cleanSwapchain :: proc(ctx: ^Context) {   
+    device := ctx.vulkan.device
+    swapchain := &ctx.sc.swapchain
+    depthImage := &ctx.sc.depthImage
+    colorImage := &ctx.sc.colorImage
+   
     for fb in swapchain.attachments.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
     for view in swapchain.attachments.views do vk.DestroyImageView(device, view, nil)
 

@@ -13,9 +13,10 @@ hasStencilComponent :: proc(format: vk.Format) -> bool{
     return format == .D32_SFLOAT_S8_UINT || format == .D24_UNORM_S8_UINT
 }
 
-pickPhysicalDevice :: proc(using ctx: ^Context) {
-    using ctx.vulkan
-    using ctx.sc
+pickPhysicalDevice :: proc(ctx: ^Context) {
+    device := ctx.vulkan.device
+    instance := ctx.vulkan.instance
+
     deviceCount: u32 = 0
     result := vk.EnumeratePhysicalDevices(instance, &deviceCount, nil);
     if result != .SUCCESS {
@@ -29,7 +30,7 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
         panic("Failed to enumerate physical devices!");
     }
  
-    suitability :: proc(using ctx: ^Context, dev: vk.PhysicalDevice) -> int {
+    suitability :: proc(ctx: ^Context, dev: vk.PhysicalDevice) -> int {
         props: vk.PhysicalDeviceProperties  
         features: vk.PhysicalDeviceFeatures
         vk.GetPhysicalDeviceProperties(dev, &props)
@@ -55,8 +56,8 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
     for dev in devices {
         score := suitability(ctx, dev)
         if score > hiscore {
-            physicalDevice = dev
-            msaa = getUsableSampleCount(physicalDevice)
+            ctx.vulkan.physicalDevice = dev
+            ctx.sc.msaa = getUsableSampleCount(ctx.vulkan.physicalDevice)
             hiscore = score
         }
     }
@@ -68,13 +69,12 @@ pickPhysicalDevice :: proc(using ctx: ^Context) {
     }
 }
 
-createLogicalDevice :: proc(using ctx: ^Context) {
-    using ctx.vulkan
+createLogicalDevice :: proc(ctx: ^Context) {
     findQueueFamilies(ctx)
 
     infos: [dynamic]vk.DeviceQueueCreateInfo
     uniqueQueueFamilies := map[int]bool{}
-    for i in queueIndices do uniqueQueueFamilies[i] = true
+    for i in ctx.vulkan.queueIndices do uniqueQueueFamilies[i] = true
 
     priority :f32 = 1
     for family, _ in uniqueQueueFamilies {
@@ -107,13 +107,13 @@ createLogicalDevice :: proc(using ctx: ^Context) {
         createInfo.enabledLayerCount = 0
     }
 
-    if vk.CreateDevice(physicalDevice, &createInfo, nil, &device) != .SUCCESS {
+    if vk.CreateDevice(ctx.vulkan.physicalDevice, &createInfo, nil, &ctx.vulkan.device) != .SUCCESS {
         fmt.println("failed to create logical device")
         return 
     }
 
-    vk.GetDeviceQueue(device, u32(queueIndices[.Graphics]), 0, &graphicsQueue);
-    vk.GetDeviceQueue(device, u32(queueIndices[.Present]), 0, &presentQueue);
+    vk.GetDeviceQueue(ctx.vulkan.device, u32(ctx.vulkan.queueIndices[.Graphics]), 0, &ctx.vulkan.graphicsQueue);
+    vk.GetDeviceQueue(ctx.vulkan.device, u32(ctx.vulkan.queueIndices[.Present]), 0, &ctx.vulkan.presentQueue);
 
 }
 
@@ -142,22 +142,21 @@ checkDeviceExtensionSupport :: proc (device: vk.PhysicalDevice) -> bool {
 
 }
 
-findQueueFamilies :: proc(using ctx: ^Context) {
-    using ctx.vulkan
+findQueueFamilies :: proc(ctx: ^Context) {
     count: u32;
-    vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &count, nil)
+    vk.GetPhysicalDeviceQueueFamilyProperties(ctx.vulkan.physicalDevice, &count, nil)
 
     families:= make([]vk.QueueFamilyProperties, count);
-    vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &count, raw_data(families))
+    vk.GetPhysicalDeviceQueueFamilyProperties(ctx.vulkan.physicalDevice, &count, raw_data(families))
  
     for family, i in families {
-        if .GRAPHICS in family.queueFlags && queueIndices[.Graphics] == -1 do queueIndices[.Graphics] = i
+        if .GRAPHICS in family.queueFlags && ctx.vulkan.queueIndices[.Graphics] == -1 do ctx.vulkan.queueIndices[.Graphics] = i
 
         presentSupport : b32 = false
-        vk.GetPhysicalDeviceSurfaceSupportKHR(physicalDevice, u32(i), surface, &presentSupport)
-        if presentSupport && queueIndices[.Present] == -1 do queueIndices[.Present] = i
+        vk.GetPhysicalDeviceSurfaceSupportKHR(ctx.vulkan.physicalDevice, u32(i), ctx.vulkan.surface, &presentSupport)
+        if presentSupport &&  ctx.vulkan.queueIndices[.Present] == -1 do ctx.vulkan.queueIndices[.Present] = i
 
-        for q in queueIndices do if q == -1 do continue
+        for q in ctx.vulkan.queueIndices do if q == -1 do continue
     }
 
 }

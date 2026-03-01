@@ -4,10 +4,11 @@ import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
 
-drawFrame :: proc(using ctx: ^Context) {
-    using ctx.platform
-    using ctx.vulkan
-    using ctx.sc
+drawFrame :: proc(ctx: ^Context) {
+    device := ctx.vulkan.device
+    currentFrame := ctx.currentFrame
+    swapchain := &ctx.sc.swapchain
+
     vk.WaitForFences(device, 1, &ctx.frames[currentFrame].inFlightFences, true, max(u64))
     vk.ResetFences(device, 1, &ctx.frames[currentFrame].inFlightFences)
 
@@ -33,7 +34,7 @@ drawFrame :: proc(using ctx: ^Context) {
     waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
 
 
-    if clickPending {
+    if ctx.platform.clickPending {
     //    processClick(ctx)
     }
 
@@ -49,7 +50,7 @@ drawFrame :: proc(using ctx: ^Context) {
     submitInfo.signalSemaphoreCount = 1
     submitInfo.pSignalSemaphores = &signalSemaphores[0]
 
-    if vk.QueueSubmit(graphicsQueue, 1, &submitInfo, ctx.frames[currentFrame].inFlightFences) != .SUCCESS {
+    if vk.QueueSubmit(ctx.vulkan.graphicsQueue, 1, &submitInfo, ctx.frames[currentFrame].inFlightFences) != .SUCCESS {
         fmt.eprintln("failed to submit draw command buffer")
         os.exit(1)
     }
@@ -65,9 +66,9 @@ drawFrame :: proc(using ctx: ^Context) {
     presentInfo.pImageIndices = &imageIndex 
     presentInfo.pResults = nil 
 
-    res = vk.QueuePresentKHR(presentQueue, &presentInfo)
-    if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR || framebufferResized{
-        framebufferResized = false
+    res = vk.QueuePresentKHR(ctx.vulkan.presentQueue, &presentInfo)
+    if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR || ctx.framebufferResized{
+        ctx.framebufferResized = false
         recreateSwapchain(ctx)
     } else if res != .SUCCESS {
         fmt.eprintln("failed to present swapchain image")

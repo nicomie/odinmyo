@@ -18,8 +18,8 @@ Image :: struct {
     memory: vk.DeviceMemory,
 }
 
-createImageViews :: proc(using ctx: ^Context) {
-    using ctx.sc
+createImageViews :: proc(ctx: ^Context) {
+    swapchain := &ctx.sc.swapchain
     swapchain.attachments.views = make([]vk.ImageView, len(swapchain.images))
 
     for _, i in swapchain.images {
@@ -29,15 +29,13 @@ createImageViews :: proc(using ctx: ^Context) {
 }
 
 createImageView :: proc(
-    using ctx: ^Context, 
+    ctx: ^Context, 
     image: vk.Image, 
     format: vk.Format, 
     aspectFlags: vk.ImageAspectFlags, 
     mips: u32,
     name: cstring,
 ) -> vk.ImageView {
-    using ctx.vulkan
-
     viewInfo := vk.ImageViewCreateInfo{
         sType = .IMAGE_VIEW_CREATE_INFO,
         image = image,
@@ -52,7 +50,7 @@ createImageView :: proc(
         }
     }
     imageView: vk.ImageView
-    if vk.CreateImageView(device, &viewInfo, nil, &imageView) != .SUCCESS {
+    if vk.CreateImageView(ctx.vulkan.device, &viewInfo, nil, &imageView) != .SUCCESS {
         fmt.eprintln("failed to CreateImageView")
         os.exit(1)
     }
@@ -63,14 +61,14 @@ createImageView :: proc(
         objectHandle = cast(u64)imageView,
         pObjectName = name
     }
-    vk.SetDebugUtilsObjectNameEXT(device, &nameInfo)
+    vk.SetDebugUtilsObjectNameEXT(ctx.vulkan.device, &nameInfo)
 
     return imageView
 }
 
-createImage :: proc(using ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCountFlags, format: vk.Format, tiling: vk.ImageTiling, 
+createImage :: proc(ctx: ^Context, w,h,mips : u32, numSamples: vk.SampleCountFlags, format: vk.Format, tiling: vk.ImageTiling, 
 usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
-    using ctx.vulkan
+    device := ctx.vulkan.device
     
     imageInfo := vk.ImageCreateInfo{
         sType = .IMAGE_CREATE_INFO,
@@ -102,7 +100,7 @@ usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
     allocInfo := vk.MemoryAllocateInfo{
         sType = .MEMORY_ALLOCATE_INFO,
         allocationSize = memReq.size,
-        memoryTypeIndex = findMemType(physicalDevice, memReq.memoryTypeBits, {.DEVICE_LOCAL})
+        memoryTypeIndex = findMemType(ctx.vulkan.physicalDevice, memReq.memoryTypeBits, {.DEVICE_LOCAL})
     }
     
     if vk.AllocateMemory(device, &allocInfo, nil, &image.memory) != .SUCCESS {
@@ -114,33 +112,17 @@ usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^Image) {
         
 }
 
-createTextureImageView :: proc(using ctx: ^Context) {    
-    using ctx.resource
-    using ctx.vulkan
+createTextureImageView :: proc(ctx: ^Context) {    
+    device := ctx.vulkan.device
+    textures := &ctx.resource.textures
+
     vk.DestroyImageView(device, textures[0].view, nil)
     textures[0].view = createImageView(ctx, textures[0].handle.texture, .R8G8B8A8_SRGB, {.COLOR}, textures[0].mips, "texture")
 }
 
-
-createIdImageView :: proc(using ctx: ^Context) {    
-    using ctx.id
-    idImage.view = createImageView(ctx, idImage.image.texture, .R8G8B8A8_UNORM, {.COLOR}, 1, "id")
-}
-
-getBaseDirectory :: proc(gltfPath: string) -> string {
-    lastSlash := strings.last_index(gltfPath, "/")
-    if lastSlash == -1 {
-        return "./"  // Current directory if no slashes
-    }
-    return gltfPath[:lastSlash+1]
-}
-
-
-createTextureImage :: proc(using ctx: ^Context, texture: ^Texture,
+createTextureImage :: proc(ctx: ^Context, texture: ^Texture,
 path: string, textureIndex: int){
-    using ctx.vulkan
-    using ctx.resource
-
+    device := ctx.vulkan.device
     fmt.printf("Creating texture %d: %s\n", textureIndex, path)
     
     if !os.exists(path) {
@@ -176,16 +158,15 @@ path: string, textureIndex: int){
     transitionImageLayout(ctx, texture.handle.texture, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL, texture.mips)
     copyBufferToImage(ctx, stagingBuffer.buffer, w32, h32, texture)
 
-    destroyBuffer("imageStaging", ctx.vulkan.device, stagingBuffer)
+    destroyBuffer("imageStaging", device, stagingBuffer)
     generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.handle.texture, w, h, texture)
 }
 
-createTextureSampler ::proc(using ctx:^Context, texture: ^Texture, path: string, textureIndex: int) -> vk.Sampler{
-    using ctx.vulkan
-    using ctx.resource
+createTextureSampler ::proc(ctx:^Context, texture: ^Texture, path: string, textureIndex: int) -> vk.Sampler{
+    device := ctx.vulkan.device
 
     properties: vk.PhysicalDeviceProperties
-    vk.GetPhysicalDeviceProperties(physicalDevice, &properties)
+    vk.GetPhysicalDeviceProperties(ctx.vulkan.physicalDevice, &properties)
 
     samplerInfo := vk.SamplerCreateInfo{
         sType = .SAMPLER_CREATE_INFO,
@@ -219,7 +200,7 @@ createTextureSampler ::proc(using ctx:^Context, texture: ^Texture, path: string,
     return sampler
 }
 
-transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout, mips: u32) {
+transitionImageLayout :: proc(ctx: ^Context, image: vk.Image, format: vk.Format, oldLayout,newLayout: vk.ImageLayout, mips: u32) {
     cmdBuffer := beginCommand(ctx)
     defer endCommand(ctx, &cmdBuffer)
 
@@ -261,14 +242,12 @@ transitionImageLayout :: proc(using ctx: ^Context, image: vk.Image, format: vk.F
 }
 
 createFontTextureImage :: proc(
-    using ctx: ^Context, 
+    ctx: ^Context, 
     texture: ^Texture,
     atlas_data: []u8,
     width, height: u32,
     name: string = "font_atlas",
 ) {
-    using ctx.vulkan
-    using ctx.resource
 
     fmt.printf("Creating font texture %s: %dx%d\n", name, width, height)
 
@@ -282,12 +261,12 @@ createFontTextureImage :: proc(
 
     stagingBuffer: Buffer 
     createBuffer(ctx, imageSize, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &stagingBuffer, "fontStaging")
-    defer destroyBuffer("fontStaging", device, stagingBuffer)
+    defer destroyBuffer("fontStaging", ctx.vulkan.device, stagingBuffer)
 
     data: rawptr
-    vk.MapMemory(device, stagingBuffer.memory, 0, imageSize, {}, &data)
+    vk.MapMemory(ctx.vulkan.device, stagingBuffer.memory, 0, imageSize, {}, &data)
     mem.copy(data, raw_data(atlas_data), int(imageSize))
-    vk.UnmapMemory(device, stagingBuffer.memory)
+    vk.UnmapMemory(ctx.vulkan.device, stagingBuffer.memory)
 
     createImage(ctx, width, height, 1, {._1}, .R8_UNORM, .OPTIMAL, 
                 {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &texture.handle)

@@ -4,6 +4,7 @@ import ttf "vendor:stb/truetype"
 import "core:os"
 import "core:fmt"
 import "core:strings"
+import "base:runtime"
 
 
 Glyph :: struct {
@@ -136,10 +137,10 @@ createFontFromFile :: proc(
         return font, false
     }
     
-    fmt.printf("✓ Found font: %s\n", font_path)
+    fmt.printf("Found font: %s\n", font_path)
     
-    font_data, success := os.read_entire_file(font_path)
-    if !success {
+    font_data, success := os.read_entire_file_from_path(font_path, runtime.heap_allocator())
+    if success != {} {
         fmt.eprintf("Failed to read font file: %s\n", font_path)
         return font, false
     }
@@ -169,8 +170,7 @@ createFontFromFile :: proc(
     return font, true
 }
 
-create_font_sampler :: proc(using ctx: ^Context) -> vk.Sampler {
-    using ctx.vulkan
+create_font_sampler :: proc(ctx: ^Context) -> vk.Sampler {
     
     sampler_info := vk.SamplerCreateInfo{
         sType = .SAMPLER_CREATE_INFO,
@@ -192,7 +192,7 @@ create_font_sampler :: proc(using ctx: ^Context) -> vk.Sampler {
     }
 
     sampler: vk.Sampler
-    if vk.CreateSampler(device, &sampler_info, nil, &sampler) != .SUCCESS {
+    if vk.CreateSampler(ctx.vulkan.device, &sampler_info, nil, &sampler) != .SUCCESS {
         fmt.eprintln("ERROR: Failed to create font sampler")
         return 0
     }
@@ -203,14 +203,14 @@ create_font_sampler :: proc(using ctx: ^Context) -> vk.Sampler {
         objectHandle = cast(u64)sampler,
         pObjectName = "font_sampler",
     }
-    vk.SetDebugUtilsObjectNameEXT(device, &name_info)
+    vk.SetDebugUtilsObjectNameEXT(ctx.vulkan.device, &name_info)
     
     return sampler
 }
 
-free_font :: proc(using ctx: ^Context, font: ^Font) {
-    using ctx.vulkan
-    
+free_font :: proc(ctx: ^Context, font: ^Font) {
+    device := ctx.vulkan.device
+
     if font.texture.sampler != 0 {
         vk.DestroySampler(device, font.texture.sampler, nil)
     }
@@ -237,7 +237,7 @@ free_font :: proc(using ctx: ^Context, font: ^Font) {
 }
 
 render_text :: proc(
-    using ctx: ^Context,
+    ctx: ^Context,
     font: ^Font,
     text: string,
     x, y: f32,

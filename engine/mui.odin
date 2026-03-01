@@ -23,13 +23,10 @@ UIElement :: struct {
 
 
 UpdateUI :: proc(ctx: ^Context) {
-    using ctx.ui
-    using ctx.vulkan
-
-    for &element, i in elements {
+    for &element, i in ctx.ui.elements {
         if element.text != element.stagedText {
-            destroyBuffer("elementVBuffer", device, element.vertex_buffer^)
-            vertices := render_text(ctx, &font, element.stagedText, 100, 100, {1, 0.66, 0.11})
+            destroyBuffer("elementVBuffer", ctx.vulkan.device, element.vertex_buffer^)
+            vertices := render_text(ctx, &ctx.ui.font, element.stagedText, 100, 100, {1, 0.66, 0.11})
             defer delete(vertices)
 
             vertex_buffer := createVertexBuffer(ctx, vertices[:])

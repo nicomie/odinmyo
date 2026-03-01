@@ -12,8 +12,7 @@ RenderPassConfig :: struct  {
     final_layout: vk.ImageLayout,
 }
 
-createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.RenderPass{
-    using ctx.vulkan
+createRenderPass :: proc(ctx: ^Context, config: RenderPassConfig) -> vk.RenderPass{
     attachments := [dynamic]vk.AttachmentDescription{}
     attachment_refs := [dynamic]vk.AttachmentReference{}
 
@@ -40,7 +39,7 @@ createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.Re
     
     if config.use_depth {
         depth_attachment := vk.AttachmentDescription{
-            format = findDepthFormat(physicalDevice),
+            format = findDepthFormat(ctx.vulkan.physicalDevice),
             samples = {._1},
             loadOp = .CLEAR,
             storeOp = .DONT_CARE,
@@ -85,7 +84,7 @@ createRenderPass :: proc(using ctx: ^Context, config: RenderPassConfig) -> vk.Re
     }
 
     render_pass: vk.RenderPass
-    if vk.CreateRenderPass(device, &render_pass_info, nil, &render_pass) != .SUCCESS {
+    if vk.CreateRenderPass(ctx.vulkan.device, &render_pass_info, nil, &render_pass) != .SUCCESS {
         fmt.eprintln("failed to create render pass")
         os.exit(1)
     }

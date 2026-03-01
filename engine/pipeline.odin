@@ -4,11 +4,10 @@ import "core:math/linalg"
 import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
+import "base:runtime"
 
-createPipelineLayouts :: proc(using ctx: ^Context) {
-    using ctx.vulkan
-    using ctx.pipe
-    using ctx.id
+createPipelineLayouts :: proc(ctx: ^Context) {
+
     pRanges := vk.PushConstantRange{
         stageFlags = {.VERTEX},
         offset = 0,
@@ -16,8 +15,8 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
     }
 
     meshLayouts := [2]vk.DescriptorSetLayout{
-        descriptorSetLayouts["global"],   
-        descriptorSetLayouts["material"]
+        ctx.pipe.descriptorSetLayouts["global"],   
+        ctx.pipe.descriptorSetLayouts["material"]
     }
 
     pipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
@@ -28,22 +27,8 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
         pPushConstantRanges = &pRanges
     }
 
-    if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &meshPipelineLayout) != .SUCCESS {
+    if vk.CreatePipelineLayout(ctx.vulkan.device, &pipelineLayoutInfo, nil, &ctx.pipe.meshPipelineLayout) != .SUCCESS {
         fmt.eprintln("failed to create pipeline layout")
-        os.exit(1)
-    }
-
-    pipelineLayoutInfo = vk.PipelineLayoutCreateInfo{
-        sType = .PIPELINE_LAYOUT_CREATE_INFO,
-        setLayoutCount = 1,
-        pSetLayouts = &descriptorSetLayouts["global"],
-        pushConstantRangeCount = 1,
-        pPushConstantRanges = &pRanges
-    }
-
-
-    if vk.CreatePipelineLayout(device, &pipelineLayoutInfo, nil, &idPipelineLayout) != .SUCCESS {
-        fmt.eprintln("failed to create id pipeline layout")
         os.exit(1)
     }
 
@@ -56,35 +41,48 @@ createPipelineLayouts :: proc(using ctx: ^Context) {
      uiPipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = 1,
-        pSetLayouts = &descriptorSetLayouts["ui"],  
+        pSetLayouts = &ctx.pipe.descriptorSetLayouts["ui"],  
         pushConstantRangeCount = 1,
         pPushConstantRanges = &uiPushRange,
     }
 
-    if vk.CreatePipelineLayout(device, &uiPipelineLayoutInfo, nil, &uiPipelineLayout) != .SUCCESS {
+    if vk.CreatePipelineLayout(ctx.vulkan.device, &uiPipelineLayoutInfo, nil, &ctx.pipe.uiPipelineLayout) != .SUCCESS {
         fmt.eprintln("failed to create pipeline layout (ui)")
         os.exit(1)
     }
 }
 
-createPipelines :: proc(using ctx: ^Context) {
-    using ctx.pipe
+createPipelines :: proc(ctx: ^Context) {
     meshPipeline := createMeshPipeline(ctx)
-    idPipeline := createIdPipeline(ctx)
     uiPipeline := createUiPipeline(ctx)
-    pipelines = make(map[string]vk.Pipeline)
-    pipelines["mesh"] = meshPipeline
-    pipelines["id"] = idPipeline
-    pipelines["ui"] = uiPipeline
+    ctx.pipe.pipelines = make(map[string]vk.Pipeline)
+    ctx.pipe.pipelines["mesh"] = meshPipeline
+    ctx.pipe.pipelines["ui"] = uiPipeline
 
 }
 
-createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
-    using ctx.vulkan
-    using ctx.sc
-    using ctx.pipe
-    vertShaderCode, _:= os.read_entire_file_from_filename("shaders/vert.spv")
-    fragShaderCode, _:= os.read_entire_file_from_filename("shaders/frag.spv")
+createMeshPipeline :: proc(ctx: ^Context) -> vk.Pipeline {
+    device := ctx.vulkan.device
+    swapchain := ctx.sc.swapchain
+    allocator := runtime.heap_allocator()
+    exe_dir, err := os.get_executable_directory(allocator)
+    if err != nil {
+        fmt.eprintln("Failed to get executable directory:", err)
+        os.exit(1)
+    }
+
+    vertPath, errx := os.join_path({"shaders", "vert.spv"}, allocator)
+    fragPath, erry := os.join_path({"shaders", "frag.spv"}, allocator)
+   
+    if errx != nil do fmt.println(errx)
+    if erry != nil do fmt.println(erry)
+
+    fmt.println(vertPath)
+    fmt.println(fragPath)
+
+    vertShaderCode, _:= os.read_entire_file_from_path(vertPath, allocator)
+    fragShaderCode, _:= os.read_entire_file_from_path(fragPath, allocator)
+
     defer delete(vertShaderCode)
     defer delete(fragShaderCode)
 
@@ -196,8 +194,8 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         pMultisampleState = &multisampling,
         pDepthStencilState = &depthStencil,
         pColorBlendState = &colorBlending,
-        layout = meshPipelineLayout,
-        renderPass = renderPass,
+        layout = ctx.pipe.meshPipelineLayout,
+        renderPass = ctx.sc.renderPass,
         subpass = 0,
     }
 
@@ -210,147 +208,22 @@ createMeshPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
     return pipeline
 }
 
-createIdPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
-    using ctx.vulkan
-    using ctx.sc
-    using ctx.id
-    // Load ID shader modules
-    vertShaderCode, _:= os.read_entire_file_from_filename("shaders/id-vert.spv") 
-    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/id-frag.spv")
+createUiPipeline :: proc(ctx: ^Context) -> vk.Pipeline {
+    device := ctx.vulkan.device
+    swapchain := ctx.sc.swapchain
 
-    defer delete(vertShaderCode)
-    defer delete(fragShaderCode)
+    allocator := runtime.heap_allocator()
+    vertPath, errx := os.join_path({ "shaders", "ui.vert.spv"}, allocator)
+    fragPath, erry := os.join_path({"shaders", "ui.frag.spv"}, allocator)
+   
+    if errx != nil do fmt.println(errx)
+    if erry != nil do fmt.println(erry)
 
-    vertShaderModule := createShaderModule(vertShaderCode, device)
-    fragShaderModule := createShaderModule(fragShaderCode, device)
-    defer vk.DestroyShaderModule(device, vertShaderModule, nil)
-    defer vk.DestroyShaderModule(device, fragShaderModule, nil)
+    fmt.println(vertPath)
+    fmt.println(fragPath)
 
-    vertShaderStage := vk.PipelineShaderStageCreateInfo{
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.VERTEX},
-        module = vertShaderModule,
-        pName = "main",
-    }
-
-    fragShaderStage := vk.PipelineShaderStageCreateInfo{
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.FRAGMENT},
-        module = fragShaderModule,
-        pName = "main",
-    }
-
-    shaderStages := []vk.PipelineShaderStageCreateInfo{vertShaderStage, fragShaderStage}
-
-    vertexInput := vk.PipelineVertexInputStateCreateInfo{
-        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        vertexBindingDescriptionCount = 1,
-        pVertexBindingDescriptions = &VERTEX_BINDING,
-        vertexAttributeDescriptionCount = cast(u32)len(VERTEX_ATTRIBUTES),
-        pVertexAttributeDescriptions = &VERTEX_ATTRIBUTES[0],
-    }
-
-    inputAssembly := vk.PipelineInputAssemblyStateCreateInfo{
-        sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        topology = .TRIANGLE_LIST,
-        primitiveRestartEnable = false,
-    }
-
-    viewport := vk.Viewport{
-        x = 0,
-        y = 0,
-        width = cast(f32)swapchain.extent.width,
-        height = cast(f32)swapchain.extent.height,
-        minDepth = 0,
-        maxDepth = 1,
-    }
-
-    scissor := vk.Rect2D{
-        offset = {0, 0},
-        extent = swapchain.extent,
-    }
-
-    viewportState := vk.PipelineViewportStateCreateInfo{
-        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        viewportCount = 1,
-        pViewports = &viewport,
-        scissorCount = 1,
-        pScissors = &scissor,
-    }
-
-    rasterizer := vk.PipelineRasterizationStateCreateInfo{
-        sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        depthClampEnable = false,
-        rasterizerDiscardEnable = false,
-        polygonMode = .FILL,
-        lineWidth = 1.0,
-        cullMode = nil,
-        frontFace = .COUNTER_CLOCKWISE,
-        depthBiasEnable = false,
-    }
-
-    multisampling := vk.PipelineMultisampleStateCreateInfo{
-        sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        sampleShadingEnable = false,
-        rasterizationSamples = {._1} 
-    }
-
-    depthStencil := vk.PipelineDepthStencilStateCreateInfo{
-        sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        depthTestEnable = true,
-        depthWriteEnable = true,
-        depthCompareOp = .LESS,
-        depthBoundsTestEnable = false,
-        stencilTestEnable = false,
-    }
-
-    colorBlendAttachment := vk.PipelineColorBlendAttachmentState{
-        colorWriteMask = {.R, .G, .B, .A},
-        blendEnable = false,
-    }
-
-    colorBlending := vk.PipelineColorBlendStateCreateInfo{
-        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        logicOpEnable = false,
-        attachmentCount = 1,
-        pAttachments = &colorBlendAttachment,
-    }
-
-    pipelineInfo := vk.GraphicsPipelineCreateInfo{
-        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
-        stageCount = cast(u32)len(shaderStages),
-        pStages = &shaderStages[0],
-        pVertexInputState = &vertexInput,
-        pInputAssemblyState = &inputAssembly,
-        pViewportState = &viewportState,
-        pRasterizationState = &rasterizer,
-        pMultisampleState = &multisampling,
-        pDepthStencilState = &depthStencil,
-        pColorBlendState = &colorBlending,
-        layout = idPipelineLayout, // This layout should include the UBO with ID
-        renderPass = idRenderPass, // Your special render pass for ID picking
-        subpass = 0,
-    }
-
-    pipeline: vk.Pipeline
-    if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline) != .SUCCESS {
-        fmt.eprintln("failed to create ID picking pipeline")
-        os.exit(1)
-    }
-
-    return pipeline
-}
-
-createUiPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
-    using ctx.vulkan
-    using ctx.sc
-    using ctx.pipe
-    //using ctx.ui
-
-    // Load UI shader modules
-    vertShaderCode, _ := os.read_entire_file_from_filename("shaders/ui.vert.spv")
-    fragShaderCode, _ := os.read_entire_file_from_filename("shaders/ui.frag.spv")
-
+    vertShaderCode, _:= os.read_entire_file_from_path(vertPath, allocator)
+    fragShaderCode, _:= os.read_entire_file_from_path(fragPath, allocator)
     defer delete(vertShaderCode)
     defer delete(fragShaderCode)
 
@@ -469,8 +342,8 @@ createUiPipeline :: proc(using ctx: ^Context) -> vk.Pipeline {
         pMultisampleState = &multisampling,
         pDepthStencilState = &depthStencil,
         pColorBlendState = &colorBlending,
-        layout = uiPipelineLayout,  
-        renderPass = renderPass,   
+        layout = ctx.pipe.uiPipelineLayout,  
+        renderPass = ctx.sc.renderPass,   
         subpass = 0,
     }
 

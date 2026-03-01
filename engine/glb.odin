@@ -10,6 +10,7 @@ import "core:strings"
 import "core:mem"
 import "core:math"
 import "core:math/linalg"
+import "base:runtime"
 
 ResourceManager :: struct {
     meshes: [dynamic]Mesh,
@@ -162,7 +163,7 @@ processSingleMaterial :: proc(gm: ^cgltf.material, index: int) -> Material {
     return m
 }
 
-processNode :: proc(using ctx: ^Context, node: ^cgltf.node, parent_transform: Mat4, rm: ^ResourceManager) {
+processNode :: proc(ctx: ^Context, node: ^cgltf.node, parent_transform: Mat4, rm: ^ResourceManager) {
     local_transform := getNodeTransform(node)
     world_transform := parent_transform * local_transform
     
@@ -177,7 +178,7 @@ processNode :: proc(using ctx: ^Context, node: ^cgltf.node, parent_transform: Ma
     }
 }
 
-processMeshNode :: proc(using ctx: ^Context, node: ^cgltf.node, mesh: ^cgltf.mesh, world_transform: Mat4, rm: ^ResourceManager) {
+processMeshNode :: proc(ctx: ^Context, node: ^cgltf.node, mesh: ^cgltf.mesh, world_transform: Mat4, rm: ^ResourceManager) {
     fmt.printf("Processing mesh node: %s\n", node.name != nil ? string(node.name) : "unnamed")
     
     verts: [dynamic]Vertex 
@@ -259,23 +260,25 @@ collectMaterialsFromNode :: proc(node: ^cgltf.node, unique_materials: ^map[^cglt
 }
 
 
-setupGlb :: proc(using ctx: ^Context, path: cstring) {
+setupGlb :: proc(ctx: ^Context, path: cstring, filename: string) {
     rm := &ctx.resource
-    
-    data, res := cgltf.parse_file({}, path)
+    baseDir := string(path)
+
+    allocator := runtime.heap_allocator()
+    filePath, _ := os.join_path({baseDir, filename}, allocator)
+    cbaseDir := strings.clone_to_cstring(filePath)
+    data, res := cgltf.parse_file({}, cbaseDir)
     if res != .success {
-        fmt.eprintf("Failed to parse GLTF: %s\n", path)
+        fmt.eprintf("Failed to parse GLTF: %s %s\n", filePath, res)
         return
     }
     defer cgltf.free(data)
-    
-    if cgltf.load_buffers({}, data, path) != .success {
-        fmt.eprintf("Failed to load buffers: %s\n", path)
+
+    if cgltf.load_buffers({}, data, cbaseDir) != .success {
+        fmt.eprintf("Failed to load buffers: %s\n", filePath)
         return
     }
-
-    baseDir := getBaseDirectory(string(path))
-    fmt.printf("Base directory for textures: %s\n", baseDir)
+    fmt.printf("Base directory for textures: %s\n", filePath)
 
     loadAllTextures(ctx, data, baseDir)
     
@@ -351,13 +354,11 @@ processAllMaterials :: proc(rm: ^ResourceManager, data: ^cgltf.data) {
     }
 }
 
-loadAllTextures :: proc(using ctx: ^Context, data: ^cgltf.data, path: string) {
-    using ctx.resource
-    
+loadAllTextures :: proc(ctx: ^Context, data: ^cgltf.data, path: string) {    
     fmt.printf("Loading %d textures...\n", len(data.images))
     
     // Create array for all textures
-    textures = make([]^Texture, len(data.images))
+    ctx.resource.textures = make([]^Texture, len(data.images))
     
     for i in 0..<len(data.images) {
         image := data.images[i]
@@ -369,22 +370,21 @@ loadAllTextures :: proc(using ctx: ^Context, data: ^cgltf.data, path: string) {
         
         // Build proper path - adjust base path as needed
         basePath := path
-        texturePath := fmt.tprintf("%s%s", basePath, string(image.uri))
+        texturePath, _ := os.join_path({basePath, string(image.uri)}, runtime.heap_allocator())
         fmt.printf("Loading texture %d: %s\n", i, texturePath)
         
         // Create texture with correct index
         fmt.println("File exists, proceeding with texture creation...")
-        textures[i] = createTextureFromFile(ctx, texturePath, i)
+        ctx.resource.textures[i] = createTextureFromFile(ctx, texturePath, i)
     }
 }
 
-createTextureFromFile :: proc(using ctx: ^Context, path: string, textureIndex: int) -> ^Texture {
-    using ctx.vulkan
+createTextureFromFile :: proc(ctx: ^Context, path: string, textureIndex: int) -> ^Texture {
     texture := new(Texture)
     createTextureImage(ctx, texture, path, textureIndex)
     texture.view = createImageView(ctx, texture.handle.texture, .R8G8B8A8_SRGB, {.COLOR}, texture.mips, "texture")
     texture.sampler = createTextureSampler(ctx, texture, path, textureIndex)
-      fmt.println("here")
+    fmt.println("here")
 
     return texture
 }
@@ -510,9 +510,7 @@ processPrimitive :: proc(p: cgltf.primitive) -> ([]Vertex, []u32) {
 }
 
 
-createTextureImageFromPixels :: proc(using ctx: ^Context, texture: ^Texture, pixels: rawptr, w, h: i32, textureIndex: int) {
-    using ctx.vulkan
-
+createTextureImageFromPixels :: proc(ctx: ^Context, texture: ^Texture, pixels: rawptr, w, h: i32, textureIndex: int) {
     w32 := cast(u32)w
     h32 := cast(u32)h
     channels :u32 = 4
@@ -521,9 +519,9 @@ createTextureImageFromPixels :: proc(using ctx: ^Context, texture: ^Texture, pix
     staging: Buffer
     createBuffer(ctx, imageSize, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging, "imageStaging")
     data: rawptr
-    vk.MapMemory(device, staging.memory, 0, imageSize, {}, &data)
+    vk.MapMemory(ctx.vulkan.device, staging.memory, 0, imageSize, {}, &data)
     mem.copy(data, pixels, cast(int)imageSize)
-    vk.UnmapMemory(device, staging.memory)
+    vk.UnmapMemory(ctx.vulkan.device, staging.memory)
 
     texture.mips = cast(u32)math.floor_f32(math.log2(cast(f32)math.min(w, h))) + 1
 
@@ -537,9 +535,7 @@ createTextureImageFromPixels :: proc(using ctx: ^Context, texture: ^Texture, pix
     generateMipmaps(ctx, .R8G8B8A8_SRGB, texture.handle.texture, w, h, texture)
 }
 
-createTextureFromMemory :: proc(using ctx: ^Context, bytes: []u8, size: int, uri: cstring) -> ^Texture {
-    using ctx.vulkan
-
+createTextureFromMemory :: proc(ctx: ^Context, bytes: []u8, size: int, uri: cstring) -> ^Texture {
     w, h, channels: i32
     pixels := image.load_from_memory(raw_data(bytes), cast(i32)size, &w, &h, &channels, 4)
     if pixels == nil {
@@ -562,8 +558,8 @@ loadCgltfImageBytes :: proc(img: ^cgltf.image, data: ^cgltf.data) -> ([]u8, int)
 
     if img.uri != nil {
         path := fmt.tprintf("glbs/SciFiHelmet/glTF/%s", string(img.uri))
-        file , ok := os.read_entire_file(path)
-        if !ok {
+        file , ok := os.read_entire_file_from_path(path, {})
+        if ok != {} {
             fmt.eprintf("Failed to read image file: %s\n", path)
             return nil, 0
         }
@@ -588,7 +584,7 @@ loadCgltfImageBytes :: proc(img: ^cgltf.image, data: ^cgltf.data) -> ([]u8, int)
 
 // CHECK 
 /*
-createTextureFromFile :: proc(using ctx: ^Context, path: string, textureIndex: int) -> ^Texture {
+createTextureFromFile :: proc(ctx: ^Context, path: string, textureIndex: int) -> ^Texture {
     using ctx.vulkan
     texture := new(Texture)
     createTextureImage(ctx, texture, path, textureIndex)
@@ -599,7 +595,7 @@ createTextureFromFile :: proc(using ctx: ^Context, path: string, textureIndex: i
     return texture
 }
 
-loadTextures :: proc(using ctx: ^Context, data: ^cgltf.data) {
+loadTextures :: proc(ctx: ^Context, data: ^cgltf.data) {
     using ctx.resource
     textures = make([]^Texture, len(data.images))
     for i in 0..<len(data.images) {

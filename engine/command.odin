@@ -4,18 +4,17 @@ import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
 
-beginCommand :: proc(using ctx:^Context) -> vk.CommandBuffer{
-    using ctx.vulkan
+beginCommand :: proc(ctx:^Context) -> vk.CommandBuffer{
     fmt.println("Beginning command buffer...")
     allocInfo := vk.CommandBufferAllocateInfo{
         sType = .COMMAND_BUFFER_ALLOCATE_INFO,
         level = .PRIMARY,
-        commandPool = commandPool,
+        commandPool = ctx.vulkan.commandPool,
         commandBufferCount = 1
     }
 
     cmdBuffer : vk.CommandBuffer
-    vk.AllocateCommandBuffers(device, &allocInfo, &cmdBuffer)
+    vk.AllocateCommandBuffers(ctx.vulkan.device, &allocInfo, &cmdBuffer)
 
     beginInfo := vk.CommandBufferBeginInfo{
         sType = .COMMAND_BUFFER_BEGIN_INFO,
@@ -26,8 +25,7 @@ beginCommand :: proc(using ctx:^Context) -> vk.CommandBuffer{
     return cmdBuffer
 }
 
-endCommand :: proc(using ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
-    using ctx.vulkan
+endCommand :: proc(ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
     vk.EndCommandBuffer(cmdBuffer^)
     fmt.println("Ending command buffer...")
     submitInfo := vk.SubmitInfo{
@@ -36,7 +34,7 @@ endCommand :: proc(using ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
         pCommandBuffers = &cmdBuffer^
     }
 
-    vk.QueueSubmit(graphicsQueue, 1, &submitInfo, {})
-    vk.QueueWaitIdle(graphicsQueue)
-    vk.FreeCommandBuffers(device, commandPool, 1, &cmdBuffer^)
+    vk.QueueSubmit(ctx.vulkan.graphicsQueue, 1, &submitInfo, {})
+    vk.QueueWaitIdle(ctx.vulkan.graphicsQueue)
+    vk.FreeCommandBuffers(ctx.vulkan.device, ctx.vulkan.commandPool, 1, &cmdBuffer^)
 }
