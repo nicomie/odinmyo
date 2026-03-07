@@ -61,11 +61,9 @@ SwapchainContext :: struct {
 }
 
 FrameContext :: struct {
-	commandBuffers:           vk.CommandBuffer,
-	idCommandBuffer:          vk.CommandBuffer,
-	imageAvailableSemaphores: vk.Semaphore,
-	renderFinishedSemaphores: vk.Semaphore,
-	inFlightFences:           vk.Fence,
+	commandBuffer:           vk.CommandBuffer,
+	imageAvailableSemaphore: vk.Semaphore,
+	inFlightFence:           vk.Fence,
 }
 
 PipelineContext :: struct {
@@ -104,6 +102,8 @@ Context :: struct {
 	scene:              SceneContext,
 	ui:                 UIContext,
 	frames:             [MAX_FRAMES_IN_FLIGHT]FrameContext,
+	imagesInFlight: 	[]vk.Fence,
+	renderFinishedSemaphores: []vk.Semaphore,
 	currentFrame:       u32,
 	framebufferResized: bool,
 }
@@ -170,6 +170,8 @@ initVulkan :: proc(ctx: ^Context) {
 	//createIdDescriptorSets(ctx)
 	createSyncObjects(ctx)
 
+	ffmpeg_test()
+
 }
 
 exit :: proc(ctx: ^Context) {
@@ -231,9 +233,9 @@ exit :: proc(ctx: ^Context) {
 
 	// --- Sync ---
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-		vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphores, nil)
-		vk.DestroySemaphore(device, ctx.frames[i].renderFinishedSemaphores, nil)
-		vk.DestroyFence(device, ctx.frames[i].inFlightFences, nil)
+		vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphore, nil)
+		vk.DestroySemaphore(device, ctx.renderFinishedSemaphores[i], nil)
+		vk.DestroyFence(device, ctx.frames[i].inFlightFence, nil)
 	}
 
 	// --- Command pool ---

@@ -148,6 +148,22 @@ createSwapchain :: proc(ctx: ^Context) {
 	swapchain.images = make([]vk.Image, swapchain.imageCount)
 	vk.GetSwapchainImagesKHR(device, swapchain.handle, &swapchain.imageCount, raw_data(swapchain.images));
 
+    ctx.imagesInFlight = make([]vk.Fence, swapchain.imageCount)
+    for i in 0..<swapchain.imageCount {
+        ctx.imagesInFlight[i] = {}
+    }
+    ctx.renderFinishedSemaphores = make([]vk.Semaphore, swapchain.imageCount)
+
+    semaphoreInfo: vk.SemaphoreCreateInfo
+    semaphoreInfo.sType = .SEMAPHORE_CREATE_INFO
+
+    for i in 0..<swapchain.imageCount {
+        if vk.CreateSemaphore(device, &semaphoreInfo, nil, &ctx.renderFinishedSemaphores[i]) != .SUCCESS {
+            fmt.eprintln("failed to create renderFinished semaphore")
+            os.exit(1)
+        }
+    }
+
     swapchain.format = surfaceFormat.format 
     swapchain.extent = extent
 

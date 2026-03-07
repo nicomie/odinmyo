@@ -120,9 +120,11 @@ createCommandBuffers :: proc(ctx: ^Context) {
     allocInfo.level = .PRIMARY
     allocInfo.commandBufferCount = MAX_FRAMES_IN_FLIGHT
 
-    if vk.AllocateCommandBuffers(device, &allocInfo, &ctx.frames[0].commandBuffers) != .SUCCESS {
-        fmt.eprintln("failed to create command buffer")
-        os.exit(1)
+    for i in 0..<MAX_FRAMES_IN_FLIGHT {
+        if vk.AllocateCommandBuffers(device, &allocInfo, &ctx.frames[i].commandBuffer) != .SUCCESS {
+            fmt.eprintln("failed to create command buffer")
+            os.exit(1)
+        }
     }
 }
 
