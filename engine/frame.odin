@@ -30,8 +30,7 @@ drawFrame :: proc(ctx: ^Context) {
     
     vk.ResetCommandBuffer(ctx.frames[currentFrame].commandBuffer, {})
     updateUniformBuffer(ctx, currentFrame)
-    _, buffer := recordCommandBuffer(ctx, ctx.frames[currentFrame].commandBuffer, imageIndex)
-    _, _ =  recordUICommandBuffer(ctx, buffer, imageIndex)
+    recordCommandBuffer(ctx, ctx.frames[currentFrame].commandBuffer, imageIndex)
  
     waitSemaphores := [?]vk.Semaphore{ctx.frames[currentFrame].imageAvailableSemaphore}
     waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}

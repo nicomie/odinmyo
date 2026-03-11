@@ -134,7 +134,7 @@ destroyBuffer :: proc(name: string, device: vk.Device, buf: Buffer) {
     vk.FreeMemory(device, buf.memory, nil)
 }
 
-recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) -> (lastPass: bool, b: vk.CommandBuffer) {
+recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
     swapchain := &ctx.sc.swapchain
 
     beginInfo: vk.CommandBufferBeginInfo
@@ -174,77 +174,20 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
     scissor.extent = swapchain.extent
     vk.CmdSetScissor(buffer, 0, 1, &scissor)
 
-    vk.CmdBindPipeline(buffer, .GRAPHICS, ctx.pipe.pipelines["mesh"])
-
-    vk.CmdBindDescriptorSets(buffer, vk.PipelineBindPoint.GRAPHICS, ctx.pipe.meshPipelineLayout, 
-                        0, 1, &ctx.scene.cameraSystem.descriptorSets[ctx.currentFrame], 0, nil);
-
-                    
-
-    for &o in ctx.resource.meshObjects {
-        mesh := ctx.resource.meshes[o.meshIndex]
-
-        vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
-        offsets := [?]vk.DeviceSize{0}
-
-        vk.CmdBindVertexBuffers(buffer, 0, 1, &vertexBuffers[0], &offsets[0])
-        vk.CmdBindIndexBuffer(buffer, mesh.indexBuffer.buffer, 0, .UINT32)
-
-        vk.CmdPushConstants(
-            buffer, 
-            ctx.pipe.meshPipelineLayout,
-            {.VERTEX}, 
-            0, 
-            size_of(Mat4), 
-            &o.worldTransform
-        )
-
-        for primitive in mesh.primitives {
-            matIndex := primitive.materialIndex
-            vk.CmdBindDescriptorSets(buffer, .GRAPHICS, ctx.pipe.meshPipelineLayout, 1, 1, 
-                &ctx.resource.materials[matIndex].descriptorSets[ctx.currentFrame], 0, nil)
-            vk.CmdDrawIndexed(buffer, cast(u32)primitive.indexCount, 1, cast(u32)primitive.firstIndex, primitive.firstVertex, 0)
+    for m in ctx.render.modules {
+        for i in 0..<len(m.renderProcedures) {
+            m.renderProcedures[i]->record(ctx, buffer, ctx.currentFrame)
         }
     }
 
-    return false, buffer
-}
-
-recordUICommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) -> (lastPass: bool, b: vk.CommandBuffer) {
-    descriptorSets := &ctx.ui.uiDescriptorSets
-    swapchain := &ctx.sc.swapchain
-
-    vk.CmdBindPipeline(buffer, .GRAPHICS, ctx.pipe.pipelines["ui"])
-    vk.CmdBindDescriptorSets(buffer, .GRAPHICS, ctx.pipe.uiPipelineLayout, 0, 1, &descriptorSets[ctx.currentFrame], 0, nil)
-
-    for &element in ctx.ui.elements {
-        screen_size := Vec2{f32(swapchain.extent.width), f32(swapchain.extent.height)}
-        vk.CmdPushConstants(
-            buffer,
-            ctx.pipe.uiPipelineLayout,
-            {.VERTEX, .FRAGMENT},
-            0,                 
-            size_of(Vec2), 
-            &screen_size,
-        )
-
-        if &element.vertex_buffer^ != nil {
-            vertexBuffers := [?]vk.Buffer{element.vertex_buffer.buffer}
-            offsets := [?]vk.DeviceSize{0}
-            vk.CmdBindVertexBuffers(buffer, 0, 1, raw_data(vertexBuffers[:]), raw_data(offsets[:]))
-            vk.CmdDraw(buffer, u32(element.vertex_buffer.length), 1, 0, 0)
-        }
-    }
-
+  
     vk.CmdEndRenderPass(buffer)
-    
     if vk.EndCommandBuffer(buffer) != .SUCCESS {
         fmt.eprintln("failed to end command buffer")
-        return false, nil
     }
-
-    return true, buffer
 }
+
+
 
 copyBufferToImage :: proc(ctx: ^Context, buffer: vk.Buffer, w,h : u32, texture: ^Texture) {
     cmdBuffer := beginCommand(ctx)

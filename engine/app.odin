@@ -1,5 +1,6 @@
 package engine
 
+import "vendor:darwin/CoreVideo"
 import cr "../engine/core"
 import "base:runtime"
 import "core:c"
@@ -71,18 +72,9 @@ PipelineContext :: struct {
 	meshPipelineLayout:   vk.PipelineLayout,
 	uiPipelineLayout:     vk.PipelineLayout,
 	descriptorPool:       vk.DescriptorPool,
-	descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
+	descriptorSetLayouts: map[string]vk.DescriptorSetLayout
 }
 
-IdPipelineContext :: struct {
-	idStagingBuffer:       Buffer,
-	idStagingBufferMemory: vk.DeviceMemory,
-	idPipelineLayout:      vk.PipelineLayout,
-	idDescriptorSets:      [2 * MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-	idImage:               DepthImage,
-	idRenderPass:          vk.RenderPass,
-	idFramebuffer:         vk.Framebuffer,
-}
 
 SceneContext :: struct {
 	cameraSystem: CameraSystem,
@@ -98,7 +90,6 @@ Context :: struct {
 	sc:                 SwapchainContext,
 	pipe:               PipelineContext,
 	resource:           ResourceManager,
-	id:                 IdPipelineContext,
 	scene:              SceneContext,
 	ui:                 UIContext,
 	frames:             [MAX_FRAMES_IN_FLIGHT]FrameContext,
@@ -106,6 +97,10 @@ Context :: struct {
 	renderFinishedSemaphores: []vk.Semaphore,
 	currentFrame:       u32,
 	framebufferResized: bool,
+	render: RenderSystem,
+    
+	globalDescriptorSetLayouts: map[string]vk.DescriptorSetLayout,
+	globalDescriptorSets: []vk.DescriptorSet,
 }
 
 Ray :: struct {
@@ -144,34 +139,25 @@ initVulkan :: proc(ctx: ^Context) {
 		{format = ctx.sc.swapchain.format, use_depth = true, final_layout = .PRESENT_SRC_KHR},
 	)
 
-	createDescriptorSetLayouts(ctx)
-	createPipelineLayouts(ctx)
 	createCommandPool(ctx)
-	createPipelines(ctx)
-
-	allocator := runtime.heap_allocator()
-	file, errx := os.join_path({"glbs", "SciFiHelmet", "glTF"}, allocator)
-	setupGlb(ctx, strings.clone_to_cstring(file), "SciFiHelmet.gltf")
-	createColorResources(ctx)
+    createColorResources(ctx)
 	createDepthResource(ctx)
-
 	createFramebuffer(ctx)
 	createUniformBuffers(ctx)
 	createCommandBuffers(ctx)
 	createDescriptorPool(ctx)
 
+	createGlobalDescriptorSetLayouts(ctx)
 	createGlobalDescriptorSets(ctx)
-	fmt.println("HELOO")
-	createMaterialDescriptorSets(ctx)
+	createGlobalPipelineLayouts(ctx)
 
 	bool := AddUI(ctx)
 	createUiDescriptorSets(ctx)
-
-	//createIdDescriptorSets(ctx)
 	createSyncObjects(ctx)
 
 	ffmpeg_test()
-
+	ctx.render.modules = make([]^RenderModule, 1)
+	ctx.render.modules[0] = init3DModule(ctx)
 }
 
 exit :: proc(ctx: ^Context) {
@@ -181,6 +167,10 @@ exit :: proc(ctx: ^Context) {
 
 	vk.DeviceWaitIdle(device)
 	cleanSwapchain(ctx)
+
+	for module in ctx.render.modules {
+		module->shutdown(ctx)
+	}
 
 	for texture in textures {
 		vk.DestroySampler(device, texture^.sampler, nil)
@@ -214,10 +204,9 @@ exit :: proc(ctx: ^Context) {
 
 	// --- Descriptor cleanup ---
 	vk.DestroyDescriptorPool(device, ctx.pipe.descriptorPool, nil)
-	vk.DestroyDescriptorSetLayout(device, ctx.pipe.descriptorSetLayouts["global"], nil)
-	vk.DestroyDescriptorSetLayout(device, ctx.pipe.descriptorSetLayouts["material"], nil)
-	vk.DestroyDescriptorSetLayout(device, ctx.pipe.descriptorSetLayouts["ui"], nil)
-	delete(ctx.pipe.descriptorSetLayouts)
+	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["global"], nil)
+	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["ui"], nil)
+	delete(ctx.globalDescriptorSetLayouts)
 
 	// --- Pipelines ---
 	for _, pipeline in ctx.pipe.pipelines {
@@ -225,7 +214,6 @@ exit :: proc(ctx: ^Context) {
 	}
 	delete(ctx.pipe.pipelines)
 
-	vk.DestroyPipelineLayout(device, ctx.pipe.meshPipelineLayout, nil)
 	vk.DestroyPipelineLayout(device, ctx.pipe.uiPipelineLayout, nil)
 
 	// --- Render passes ---
@@ -234,8 +222,10 @@ exit :: proc(ctx: ^Context) {
 	// --- Sync ---
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphore, nil)
-		vk.DestroySemaphore(device, ctx.renderFinishedSemaphores[i], nil)
 		vk.DestroyFence(device, ctx.frames[i].inFlightFence, nil)
+	}
+	for i in 0 ..< len(ctx.renderFinishedSemaphores) {
+		vk.DestroySemaphore(device, ctx.renderFinishedSemaphores[i], nil)
 	}
 
 	// --- Command pool ---
@@ -274,10 +264,11 @@ run :: proc(ctx: ^Context) {
 				case .ESCAPE:
 					break loop
 				case .SPACE:
-					isPlayer := !ctx.scene.isPlayer
+					ctx.scene.isPlayer = !ctx.scene.isPlayer
+					
 					ctx.ui.elements[0].stagedText = ctx.scene.isPlayer ? "Playing" : "Viewing"
-					if !isPlayer do camera_system_toggle(cameraSystem, .Free)
-					if isPlayer do camera_system_toggle(cameraSystem, .Player)
+					if !ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Free)
+					if ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Player)
 					fmt.printf("isPlayer toggled to: %t\n", ctx.scene.isPlayer)
 				}
 			case .KEYUP:

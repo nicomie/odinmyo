@@ -260,7 +260,7 @@ collectMaterialsFromNode :: proc(node: ^cgltf.node, unique_materials: ^map[^cglt
 }
 
 
-setupGlb :: proc(ctx: ^Context, path: cstring, filename: string) {
+setupGlb :: proc(ctx: ^Context, path: cstring, filename: string, meshes: ^[]MeshObject) {
     rm := &ctx.resource
     baseDir := string(path)
 
@@ -291,6 +291,8 @@ setupGlb :: proc(ctx: ^Context, path: cstring, filename: string) {
     } else {
         fmt.println("No scene found")
     }
+
+    meshes^ = rm.meshObjects[:]
 }
 
 getNodeTransform :: proc(node: ^cgltf.node) -> Mat4 {

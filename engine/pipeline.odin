@@ -6,7 +6,9 @@ import "core:fmt"
 import "core:os"
 import "base:runtime"
 
-createPipelineLayouts :: proc(ctx: ^Context) {
+createPipelineLayouts :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
+
+    pipe := pipelineContext
 
     pRanges := vk.PushConstantRange{
         stageFlags = {.VERTEX},
@@ -15,8 +17,8 @@ createPipelineLayouts :: proc(ctx: ^Context) {
     }
 
     meshLayouts := [2]vk.DescriptorSetLayout{
-        ctx.pipe.descriptorSetLayouts["global"],   
-        ctx.pipe.descriptorSetLayouts["material"]
+        ctx.globalDescriptorSetLayouts["global"],   
+        pipe.descriptorSetLayouts["material"]
     }
 
     pipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
@@ -27,10 +29,15 @@ createPipelineLayouts :: proc(ctx: ^Context) {
         pPushConstantRanges = &pRanges
     }
 
-    if vk.CreatePipelineLayout(ctx.vulkan.device, &pipelineLayoutInfo, nil, &ctx.pipe.meshPipelineLayout) != .SUCCESS {
+    if vk.CreatePipelineLayout(ctx.vulkan.device, &pipelineLayoutInfo, nil, &pipe.meshPipelineLayout) != .SUCCESS {
         fmt.eprintln("failed to create pipeline layout")
         os.exit(1)
     }
+
+
+}
+
+createGlobalPipelineLayouts :: proc(ctx: ^Context) {
 
     uiPushRange := vk.PushConstantRange{
         stageFlags = {.VERTEX, .FRAGMENT},
@@ -41,7 +48,7 @@ createPipelineLayouts :: proc(ctx: ^Context) {
      uiPipelineLayoutInfo := vk.PipelineLayoutCreateInfo{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = 1,
-        pSetLayouts = &ctx.pipe.descriptorSetLayouts["ui"],  
+        pSetLayouts = &ctx.globalDescriptorSetLayouts["ui"],  
         pushConstantRangeCount = 1,
         pPushConstantRanges = &uiPushRange,
     }
@@ -52,16 +59,16 @@ createPipelineLayouts :: proc(ctx: ^Context) {
     }
 }
 
-createPipelines :: proc(ctx: ^Context) {
-    meshPipeline := createMeshPipeline(ctx)
-    uiPipeline := createUiPipeline(ctx)
-    ctx.pipe.pipelines = make(map[string]vk.Pipeline)
-    ctx.pipe.pipelines["mesh"] = meshPipeline
+createPipelines :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
+    meshPipeline := createMeshPipeline(ctx, pipelineContext)
+    uiPipeline := createUiPipeline(ctx, pipelineContext)
     ctx.pipe.pipelines["ui"] = uiPipeline
+    pipelineContext.pipelines = make(map[string]vk.Pipeline)
+    pipelineContext.pipelines["mesh"] = meshPipeline
 
 }
 
-createMeshPipeline :: proc(ctx: ^Context) -> vk.Pipeline {
+createMeshPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk.Pipeline {
     device := ctx.vulkan.device
     swapchain := ctx.sc.swapchain
     allocator := runtime.heap_allocator()
@@ -194,7 +201,7 @@ createMeshPipeline :: proc(ctx: ^Context) -> vk.Pipeline {
         pMultisampleState = &multisampling,
         pDepthStencilState = &depthStencil,
         pColorBlendState = &colorBlending,
-        layout = ctx.pipe.meshPipelineLayout,
+        layout = pipelineContext.meshPipelineLayout,
         renderPass = ctx.sc.renderPass,
         subpass = 0,
     }
@@ -208,7 +215,7 @@ createMeshPipeline :: proc(ctx: ^Context) -> vk.Pipeline {
     return pipeline
 }
 
-createUiPipeline :: proc(ctx: ^Context) -> vk.Pipeline {
+createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk.Pipeline {
     device := ctx.vulkan.device
     swapchain := ctx.sc.swapchain
 
