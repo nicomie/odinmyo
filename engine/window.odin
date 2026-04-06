@@ -5,8 +5,8 @@ import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
 
-WINDOW_WIDTH  :: 1280
-WINDOW_HEIGHT :: 720
+WINDOW_WIDTH  :: 1920
+WINDOW_HEIGHT :: 1080
 
 initWindow :: proc (ctx: ^Context) {
     if sdl.Init(sdl.INIT_VIDEO) != 0 {

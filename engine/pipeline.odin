@@ -128,26 +128,19 @@ createMeshPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> 
         primitiveRestartEnable = false,
     }
 
-    viewport := vk.Viewport{
-        x = 0,
-        y = 0,
-        width = cast(f32)swapchain.extent.width,
-        height = cast(f32)swapchain.extent.height,
-        minDepth = 0,
-        maxDepth = 1,
-    }
-
-    scissor := vk.Rect2D{
-        offset = {0, 0},
-        extent = swapchain.extent,
-    }
-
     viewportState := vk.PipelineViewportStateCreateInfo{
         sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         viewportCount = 1,
-        pViewports = &viewport,
+        pViewports = nil,
         scissorCount = 1,
-        pScissors = &scissor,
+        pScissors = nil,
+    }
+
+    dynamicStates := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+    dynamicState := vk.PipelineDynamicStateCreateInfo{
+        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        dynamicStateCount = cast(u32)len(dynamicStates),
+        pDynamicStates = &dynamicStates[0],
     }
 
     rasterizer := vk.PipelineRasterizationStateCreateInfo{
@@ -201,6 +194,7 @@ createMeshPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> 
         pMultisampleState = &multisampling,
         pDepthStencilState = &depthStencil,
         pColorBlendState = &colorBlending,
+        pDynamicState = &dynamicState,
         layout = pipelineContext.meshPipelineLayout,
         renderPass = ctx.sc.renderPass,
         subpass = 0,
@@ -270,26 +264,19 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
         primitiveRestartEnable = false,
     }
 
-    viewport := vk.Viewport{
-        x = 0,
-        y = 0,
-        width = cast(f32)swapchain.extent.width,
-        height = cast(f32)swapchain.extent.height,
-        minDepth = 0,
-        maxDepth = 1,
-    }
-
-    scissor := vk.Rect2D{
-        offset = {0, 0},
-        extent = swapchain.extent,
-    }
-
     viewportState := vk.PipelineViewportStateCreateInfo{
         sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         viewportCount = 1,
-        pViewports = &viewport,
+        pViewports = nil,
         scissorCount = 1,
-        pScissors = &scissor,
+        pScissors = nil,
+    }
+
+    dynamicStatesUI := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+    dynamicStateUI := vk.PipelineDynamicStateCreateInfo{
+        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        dynamicStateCount = cast(u32)len(dynamicStatesUI),
+        pDynamicStates = &dynamicStatesUI[0],
     }
 
     rasterizer := vk.PipelineRasterizationStateCreateInfo{
@@ -349,6 +336,7 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
         pMultisampleState = &multisampling,
         pDepthStencilState = &depthStencil,
         pColorBlendState = &colorBlending,
+        pDynamicState = &dynamicStateUI,
         layout = ctx.pipe.uiPipelineLayout,  
         renderPass = ctx.sc.renderPass,   
         subpass = 0,

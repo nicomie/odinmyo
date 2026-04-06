@@ -1,5 +1,6 @@
 package engine
 
+import "core:c"
 import "core:encoding/base32"
 import vk "vendor:vulkan"
 import "core:fmt"
@@ -147,7 +148,7 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
     renderPassInfo.sType = .RENDER_PASS_BEGIN_INFO
     renderPassInfo.renderPass = ctx.sc.renderPass
     renderPassInfo.framebuffer = swapchain.attachments.framebuffers[imageIndex]
-    renderPassInfo.renderArea.offset = {0, 0}
+    renderPassInfo.renderArea.offset = {0,0}
     renderPassInfo.renderArea.extent = swapchain.extent
 
     clearValues := []vk.ClearValue{
@@ -161,17 +162,17 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
     vk.CmdBeginRenderPass(buffer, &renderPassInfo, .INLINE)
 
     viewport : vk.Viewport
-    viewport.x = 0.0
+    viewport.x = cast(f32)swapchain.extent.width/2
     viewport.y = 0.0
-    viewport.width = cast(f32)swapchain.extent.width
-    viewport.height = cast(f32)swapchain.extent.height
+    viewport.width = cast(f32)swapchain.extent.width/2
+    viewport.height = cast(f32)swapchain.extent.height/2
     viewport.minDepth = 0.0
     viewport.maxDepth = 1.0
     vk.CmdSetViewport(buffer, 0, 1, &viewport)
 
     scissor : vk.Rect2D 
-    scissor.offset = {0, 0}
-    scissor.extent = swapchain.extent
+    scissor.offset = {cast(i32)swapchain.extent.width / 2, 0};
+    scissor.extent = {swapchain.extent.width / 2, swapchain.extent.height / 2};
     vk.CmdSetScissor(buffer, 0, 1, &scissor)
 
     for m in ctx.render.modules {

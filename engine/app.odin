@@ -266,7 +266,7 @@ run :: proc(ctx: ^Context) {
 				case .SPACE:
 					ctx.scene.isPlayer = !ctx.scene.isPlayer
 					
-					ctx.ui.elements[0].stagedText = ctx.scene.isPlayer ? "Playing" : "Viewing"
+					ctx.ui.elements[0].stagedText = ctx.scene.isPlayer ? fmt.aprintf("%v", ctx.sc.swapchain.extent) : "Viewing"
 					if !ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Free)
 					if ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Player)
 					fmt.printf("isPlayer toggled to: %t\n", ctx.scene.isPlayer)
