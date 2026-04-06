@@ -161,26 +161,14 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
     
     vk.CmdBeginRenderPass(buffer, &renderPassInfo, .INLINE)
 
-    viewport : vk.Viewport
-    viewport.x = cast(f32)swapchain.extent.width/2
-    viewport.y = 0.0
-    viewport.width = cast(f32)swapchain.extent.width/2
-    viewport.height = cast(f32)swapchain.extent.height/2
-    viewport.minDepth = 0.0
-    viewport.maxDepth = 1.0
-    vk.CmdSetViewport(buffer, 0, 1, &viewport)
-
-    scissor : vk.Rect2D 
-    scissor.offset = {cast(i32)swapchain.extent.width / 2, 0};
-    scissor.extent = {swapchain.extent.width / 2, swapchain.extent.height / 2};
-    vk.CmdSetScissor(buffer, 0, 1, &scissor)
-
     for m in ctx.render.modules {
         for i in 0..<len(m.renderProcedures) {
+            viewport, scissor := getViewportAndScissor(m.renderProcedures[i].renderTarget, swapchain)
+            vk.CmdSetViewport(buffer, 0, 1, &viewport)
+            vk.CmdSetScissor(buffer, 0, 1, &scissor)
             m.renderProcedures[i]->record(ctx, buffer, ctx.currentFrame)
         }
     }
-
   
     vk.CmdEndRenderPass(buffer)
     if vk.EndCommandBuffer(buffer) != .SUCCESS {
@@ -188,7 +176,34 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
     }
 }
 
+getViewportAndScissor ::proc(target: RenderTarget, swapchain: ^Swapchain) -> (vk.Viewport, vk.Rect2D) {
+    viewport : vk.Viewport
+    scissor : vk.Rect2D
 
+    if target == .Swapchain {
+            viewport.x = 0.0
+            viewport.y = 0.0
+            viewport.width = cast(f32)swapchain.extent.width
+            viewport.height = cast(f32)swapchain.extent.height
+            viewport.minDepth = 0.0
+            viewport.maxDepth = 1.0
+
+            scissor.offset = {0, 0}
+            scissor.extent = swapchain.extent 
+    } else if target == .GameViewport {
+         viewport.x = cast(f32)swapchain.extent.width/2
+            viewport.y = 0.0
+            viewport.width = cast(f32)swapchain.extent.width/2
+            viewport.height = cast(f32)swapchain.extent.height/2
+            viewport.minDepth = 0.0
+            viewport.maxDepth = 1.0
+
+            scissor.offset = {cast(i32)swapchain.extent.width / 2, 0};
+            scissor.extent = {swapchain.extent.width / 2, swapchain.extent.height / 2};
+    }
+
+    return viewport, scissor
+}
 
 copyBufferToImage :: proc(ctx: ^Context, buffer: vk.Buffer, w,h : u32, texture: ^Texture) {
     cmdBuffer := beginCommand(ctx)

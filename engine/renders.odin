@@ -18,6 +18,11 @@ RunMode :: enum{
     Multi
 }
 
+RenderTarget :: enum{
+    Swapchain,
+    GameViewport
+}
+
 RenderModule :: struct{
     name: string,
     data: rawptr,
@@ -49,6 +54,7 @@ ExitProc :: proc(r: ^RenderModule, ctx: ^Context)
 RenderProcedure :: struct {
     record: RecordProc,
     data: rawptr,
+    renderTarget: RenderTarget,
 }
 
 ThreeDModule :: struct{
@@ -64,7 +70,7 @@ recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
     vk.CmdBindDescriptorSets(cmd, .GRAPHICS, ctx.pipe.uiPipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nil)
 
     for &element in ctx.ui.elements {
-        screen_size := Vec2{f32(swapchain.extent.width), f32(swapchain.extent.height)}
+        screen_size := Vec2{f32(swapchain.extent.width/2), f32(swapchain.extent.height/2)}
         vk.CmdPushConstants(
             cmd,
             ctx.pipe.uiPipelineLayout,
@@ -127,10 +133,12 @@ init3DModule :: proc(ctx: ^Context) -> ^RenderModule {
     m.renderProcedures[0] = RenderProcedure{
         record = record3D,
         data   = m.data,
+        renderTarget = .GameViewport,
     }
     m.renderProcedures[1] = RenderProcedure{
         record = recordUI,
         data   = nil,
+        renderTarget = .Swapchain,
     }
 
     m.shutdown = shutdownThreeD
