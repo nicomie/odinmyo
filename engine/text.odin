@@ -258,7 +258,8 @@ render :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextVertex) 
 		)
 	case .Button:
 		append(&vertices, ..render_button(ctx, el)[:])
-	case .Viewport: append(&vertices, ..render_viewport(ctx, el)[:])
+	case .Viewport:
+		append(&vertices, ..render_viewport(ctx, el)[:])
 	}
 
 
@@ -271,7 +272,13 @@ render_viewport :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]Tex
 	min := Vec2{0, 0}
 	max := Vec2{el.viewportContext.startX, el.viewportContext.startY + 60}
 
-	fmt.print("Rendering viwport with min: (%.2f, %.2f), max: (%.2f, %.2f)\n", min.x, min.y, max.x, max.y)
+	fmt.print(
+		"Rendering viwport with min: (%.2f, %.2f), max: (%.2f, %.2f)\n",
+		min.x,
+		min.y,
+		max.x,
+		max.y,
+	)
 
 	bg_color := Vec4{55, 55, 0, 200}
 
@@ -308,18 +315,12 @@ render_button :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextV
 	append(&rect, TextVertex{{max.x, min.y}, noUV, bg_color})
 	append(&rect, TextVertex{{max.x, max.y}, noUV, bg_color})
 
-    text_w := text_width(ctx.ui.font, el.text)
-    text_h := ctx.ui.font.metrics.ascent - ctx.ui.font.metrics.descent
-    text_x := el.pos.x + (el.rect.max.x - text_w) / 2.0
-    text_y := el.pos.y - el.rect.max.y + text_h
+	text_w := text_width(ctx.ui.font, el.text)
+	text_h := ctx.ui.font.metrics.ascent - ctx.ui.font.metrics.descent
+	text_x := el.pos.x + (el.rect.max.x - text_w) / 2.0
+	text_y := el.pos.y - el.rect.max.y + text_h
 
-    textVertices := render_text(
-        ctx,
-        &ctx.ui.font,
-        el.text,
-        text_x,
-        text_y,
-		el.style.color)
+	textVertices := render_text(ctx, &ctx.ui.font, el.text, text_x, text_y, el.style.color)
 
 	append(&rect, ..textVertices[:])
 

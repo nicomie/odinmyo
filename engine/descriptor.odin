@@ -1,18 +1,18 @@
 package engine
 
-import vk "vendor:vulkan"
 import "core:fmt"
-import "core:os"
 import "core:mem"
+import "core:os"
+import vk "vendor:vulkan"
 
 
-VERTEX_BINDING := vk.VertexInputBindingDescription{
-    binding = 0,
-    stride = size_of(Vertex),
-    inputRate = .VERTEX,
+VERTEX_BINDING := vk.VertexInputBindingDescription {
+	binding   = 0,
+	stride    = size_of(Vertex),
+	inputRate = .VERTEX,
 }
 
-VERTEX_ATTRIBUTES := [?]vk.VertexInputAttributeDescription{
+VERTEX_ATTRIBUTES := [?]vk.VertexInputAttributeDescription {
 	{
 		binding = 0,
 		location = 0,
@@ -25,7 +25,7 @@ VERTEX_ATTRIBUTES := [?]vk.VertexInputAttributeDescription{
 		format = .R32G32B32_SFLOAT,
 		offset = cast(u32)offset_of(Vertex, color),
 	},
-    {
+	{
 		binding = 0,
 		location = 2,
 		format = .R32G32_SFLOAT,
@@ -34,258 +34,298 @@ VERTEX_ATTRIBUTES := [?]vk.VertexInputAttributeDescription{
 }
 
 DescriptorSetLayout :: struct {
-    binding: u32,
-    type: vk.DescriptorType,
-    shaderStageFlags: vk.ShaderStageFlags
+	binding:          u32,
+	type:             vk.DescriptorType,
+	shaderStageFlags: vk.ShaderStageFlags,
 }
 
 createDescriptorSetLayouts :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
-    device := ctx.vulkan.device
-    materialSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
-        {binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}}, 
-        {binding = 1, type = .UNIFORM_BUFFER, shaderStageFlags = {.FRAGMENT}}
-    })
+	device := ctx.vulkan.device
+	materialSetLayout := createDescriptorSetLayout(
+		device,
+		[]DescriptorSetLayout {
+			{binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}},
+			{binding = 1, type = .UNIFORM_BUFFER, shaderStageFlags = {.FRAGMENT}},
+		},
+	)
 
-    pipelineContext.descriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
-    pipelineContext.descriptorSetLayouts["material"] = materialSetLayout
+	pipelineContext.descriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
+	pipelineContext.descriptorSetLayouts["material"] = materialSetLayout
 
 }
 
 createGlobalDescriptorSetLayouts :: proc(ctx: ^Context) {
-    device := ctx.vulkan.device
+	device := ctx.vulkan.device
 
-    globalSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
-        {binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX}}, 
-    })
+	globalSetLayout := createDescriptorSetLayout(
+		device,
+		[]DescriptorSetLayout{{binding = 0, type = .UNIFORM_BUFFER, shaderStageFlags = {.VERTEX}}},
+	)
 
-   uiDescriptorSetLayout := createDescriptorSetLayout(device, []DescriptorSetLayout{
-        {binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}},
-    })
-    
-    ctx.globalDescriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
-    ctx.globalDescriptorSetLayouts["global"] = globalSetLayout
-    ctx.globalDescriptorSetLayouts["ui"] = uiDescriptorSetLayout
+	uiDescriptorSetLayout := createDescriptorSetLayout(
+		device,
+		[]DescriptorSetLayout {
+			{binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}},
+		},
+	)
+
+	ctx.globalDescriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
+	ctx.globalDescriptorSetLayouts["global"] = globalSetLayout
+	ctx.globalDescriptorSetLayouts["ui"] = uiDescriptorSetLayout
 
 }
 
 
-createDescriptorSetLayout :: proc(device: vk.Device, descriptorSets: []DescriptorSetLayout) -> vk.DescriptorSetLayout{
+createDescriptorSetLayout :: proc(
+	device: vk.Device,
+	descriptorSets: []DescriptorSetLayout,
+) -> vk.DescriptorSetLayout {
 
-    bindings := make([]vk.DescriptorSetLayoutBinding, len(descriptorSets))
-    for set, i in descriptorSets {
-        bindings[i] = vk.DescriptorSetLayoutBinding{
-            binding = set.binding,
-            descriptorCount = 1,
-            descriptorType = set.type,
-            stageFlags = set.shaderStageFlags,
-            pImmutableSamplers = nil,
-        }
-    }
-         
-    layoutInfo := vk.DescriptorSetLayoutCreateInfo{
-        sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        bindingCount = cast(u32)len(bindings),
-        pBindings = &bindings[0]
-    }
-    
-    layout: vk.DescriptorSetLayout
-    if vk.CreateDescriptorSetLayout(device, &layoutInfo, nil, &layout) != .SUCCESS {
-        fmt.eprintln("failed to CreateDescriptorSetLayout")
-        os.exit(1)
-    }
+	bindings := make([]vk.DescriptorSetLayoutBinding, len(descriptorSets))
+	for set, i in descriptorSets {
+		bindings[i] = vk.DescriptorSetLayoutBinding {
+			binding            = set.binding,
+			descriptorCount    = 1,
+			descriptorType     = set.type,
+			stageFlags         = set.shaderStageFlags,
+			pImmutableSamplers = nil,
+		}
+	}
 
-    return layout
+	layoutInfo := vk.DescriptorSetLayoutCreateInfo {
+		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		bindingCount = cast(u32)len(bindings),
+		pBindings    = &bindings[0],
+	}
+
+	layout: vk.DescriptorSetLayout
+	if vk.CreateDescriptorSetLayout(device, &layoutInfo, nil, &layout) != .SUCCESS {
+		fmt.eprintln("failed to CreateDescriptorSetLayout")
+		os.exit(1)
+	}
+
+	return layout
 }
 
 createGlobalDescriptorSets :: proc(ctx: ^Context) {
-    cameraSystem := &ctx.scene.cameraSystem
+	cameraSystem := &ctx.scene.cameraSystem
 
-    globalLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
-    for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        globalLayouts[i] = ctx.globalDescriptorSetLayouts["global"]
-    }
+	globalLayouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		globalLayouts[i] = ctx.globalDescriptorSetLayouts["global"]
+	}
 
-    globalAllocInfo := vk.DescriptorSetAllocateInfo{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = ctx.pipe.descriptorPool,
-        descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-        pSetLayouts = &globalLayouts[0],
-    }
+	globalAllocInfo := vk.DescriptorSetAllocateInfo {
+		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+		descriptorPool     = ctx.pipe.descriptorPool,
+		descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+		pSetLayouts        = &globalLayouts[0],
+	}
 
-    checkVk(vk.AllocateDescriptorSets(ctx.vulkan.device, &globalAllocInfo, &cameraSystem.descriptorSets[0]))
+	checkVk(
+		vk.AllocateDescriptorSets(
+			ctx.vulkan.device,
+			&globalAllocInfo,
+			&cameraSystem.descriptorSets[0],
+		),
+	)
 
-    for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        bufferInfo := vk.DescriptorBufferInfo{
-            buffer = cameraSystem.uniformBuffers[i].buffer,
-            offset = 0,
-            range = size_of(ViewProjection),
-        }
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		bufferInfo := vk.DescriptorBufferInfo {
+			buffer = cameraSystem.uniformBuffers[i].buffer,
+			offset = 0,
+			range  = size_of(ViewProjection),
+		}
 
-        globalDescriptorWrites := []vk.WriteDescriptorSet{
-            {
-                sType = .WRITE_DESCRIPTOR_SET,
-                dstSet = cameraSystem.descriptorSets[i],
-                dstBinding = 0,
-                dstArrayElement = 0,
-                descriptorType = .UNIFORM_BUFFER,
-                descriptorCount = 1,
-                pBufferInfo = &bufferInfo,
-            }
-        }
+		globalDescriptorWrites := []vk.WriteDescriptorSet {
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				dstSet = cameraSystem.descriptorSets[i],
+				dstBinding = 0,
+				dstArrayElement = 0,
+				descriptorType = .UNIFORM_BUFFER,
+				descriptorCount = 1,
+				pBufferInfo = &bufferInfo,
+			},
+		}
 
-        vk.UpdateDescriptorSets(ctx.vulkan.device, cast(u32)len(globalDescriptorWrites), &globalDescriptorWrites[0], 0, nil)
-    }
+		vk.UpdateDescriptorSets(
+			ctx.vulkan.device,
+			cast(u32)len(globalDescriptorWrites),
+			&globalDescriptorWrites[0],
+			0,
+			nil,
+		)
+	}
 }
 
 createMaterialDescriptorSets :: proc(ctx: ^Context, layout: vk.DescriptorSetLayout) {
-    device := ctx.vulkan.device
-    rm := &ctx.resource
+	device := ctx.vulkan.device
+	rm := &ctx.resource
 
-    fmt.println("=== Starting createMaterialDescriptorSets ===")
-    fmt.printf("Number of materials: %d\n", len(rm.materials))
-    fmt.printf("Number of textures: %d\n", len(rm.textures))
+	fmt.println("=== Starting createMaterialDescriptorSets ===")
+	fmt.printf("Number of materials: %d\n", len(rm.materials))
+	fmt.printf("Number of textures: %d\n", len(rm.textures))
 
-    for &mat, matIdx in rm.materials {
-                
-        fmt.printf("\n--- Processing material %d ---\n", matIdx)
+	for &mat, matIdx in rm.materials {
 
-        layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
-        for i in 0..<MAX_FRAMES_IN_FLIGHT do layouts[i] = layout
+		fmt.printf("\n--- Processing material %d ---\n", matIdx)
 
-        materialLayout := layout
-        fmt.printf("Material descriptor set layout: %v\n", materialLayout)
-        if materialLayout == {} {
-            fmt.eprintln("ERROR: Material descriptor set layout is NULL!")
-            os.exit(1)
-        }
-        allocInfo := vk.DescriptorSetAllocateInfo{
-            sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-            descriptorPool = ctx.pipe.descriptorPool,
-            descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-            pSetLayouts = &layouts[0],
-        }
+		layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
+		for i in 0 ..< MAX_FRAMES_IN_FLIGHT do layouts[i] = layout
 
-        checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &mat.descriptorSets[0]))
+		materialLayout := layout
+		fmt.printf("Material descriptor set layout: %v\n", materialLayout)
+		if materialLayout == {} {
+			fmt.eprintln("ERROR: Material descriptor set layout is NULL!")
+			os.exit(1)
+		}
+		allocInfo := vk.DescriptorSetAllocateInfo {
+			sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+			descriptorPool     = ctx.pipe.descriptorPool,
+			descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+			pSetLayouts        = &layouts[0],
+		}
 
-        bufferSize := cast(vk.DeviceSize)size_of(MaterialUBO)
+		checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &mat.descriptorSets[0]))
 
-        mat.materialUBO = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
+		bufferSize := cast(vk.DeviceSize)size_of(MaterialUBO)
 
-        for i in 0..<MAX_FRAMES_IN_FLIGHT {
-            createBuffer(ctx, bufferSize, {.UNIFORM_BUFFER}, {.HOST_VISIBLE, .HOST_COHERENT}, 
-                &mat.materialUBO[i], fmt.tprintf("material ubo%d", i))
-            vk.MapMemory(device, mat.materialUBO[i].memory, 0, bufferSize, {}, &mat.materialUBO[i].mapped_ptr)
+		mat.materialUBO = make([]Buffer, MAX_FRAMES_IN_FLIGHT)
 
-            ubo: MaterialUBO
-            ubo.color = mat.baseColorFactor
+		for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			createBuffer(
+				ctx,
+				bufferSize,
+				{.UNIFORM_BUFFER},
+				{.HOST_VISIBLE, .HOST_COHERENT},
+				&mat.materialUBO[i],
+				fmt.tprintf("material ubo%d", i),
+			)
+			vk.MapMemory(
+				device,
+				mat.materialUBO[i].memory,
+				0,
+				bufferSize,
+				{},
+				&mat.materialUBO[i].mapped_ptr,
+			)
 
-            fmt.printf("should use color: %d\n", mat.baseColorTexIndex != nil)
-            ubo.params = mat.baseColorTexIndex != nil ? Vec4{1,0,0,0} : Vec4{0,0,0,0}
+			ubo: MaterialUBO
+			ubo.color = mat.baseColorFactor
 
-            mem.copy(mat.materialUBO[i].mapped_ptr, &ubo, size_of(ubo))
-        }
+			fmt.printf("should use color: %d\n", mat.baseColorTexIndex != nil)
+			ubo.params = mat.baseColorTexIndex != nil ? Vec4{1, 0, 0, 0} : Vec4{0, 0, 0, 0}
 
-        for i in 0..<MAX_FRAMES_IN_FLIGHT {
-            imageInfo := vk.DescriptorImageInfo{
-                imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-                imageView   = rm.textures[0].view,
-                sampler     = rm.textures[0].sampler,
-            }
+			mem.copy(mat.materialUBO[i].mapped_ptr, &ubo, size_of(ubo))
+		}
 
-            bufferInfo := vk.DescriptorBufferInfo{
-                buffer = mat.materialUBO[i].buffer,
-                offset = 0,
-                range  = size_of(MaterialUBO),
-            }
+		for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+			imageInfo := vk.DescriptorImageInfo {
+				imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+				imageView   = rm.textures[0].view,
+				sampler     = rm.textures[0].sampler,
+			}
 
-            writes := []vk.WriteDescriptorSet{     
-            {
-                sType           = .WRITE_DESCRIPTOR_SET,
-                dstSet          = mat.descriptorSets[i],
-                dstBinding      = 0,
-                descriptorType  = .COMBINED_IMAGE_SAMPLER,
-                descriptorCount = 1,
-                pImageInfo      = &imageInfo,
-            },
-               {
-                sType           = .WRITE_DESCRIPTOR_SET,
-                dstSet          = mat.descriptorSets[i],
-                dstBinding      = 1,
-                descriptorType  = .UNIFORM_BUFFER,
-                descriptorCount = 1,
-                pBufferInfo      = &bufferInfo,
-            }
-        }
-            vk.UpdateDescriptorSets(device, cast(u32)len(writes), &writes[0], 0, nil)
-        }
-    }
+			bufferInfo := vk.DescriptorBufferInfo {
+				buffer = mat.materialUBO[i].buffer,
+				offset = 0,
+				range  = size_of(MaterialUBO),
+			}
+
+			writes := []vk.WriteDescriptorSet {
+				{
+					sType = .WRITE_DESCRIPTOR_SET,
+					dstSet = mat.descriptorSets[i],
+					dstBinding = 0,
+					descriptorType = .COMBINED_IMAGE_SAMPLER,
+					descriptorCount = 1,
+					pImageInfo = &imageInfo,
+				},
+				{
+					sType = .WRITE_DESCRIPTOR_SET,
+					dstSet = mat.descriptorSets[i],
+					dstBinding = 1,
+					descriptorType = .UNIFORM_BUFFER,
+					descriptorCount = 1,
+					pBufferInfo = &bufferInfo,
+				},
+			}
+			vk.UpdateDescriptorSets(device, cast(u32)len(writes), &writes[0], 0, nil)
+		}
+	}
 }
 
 createUiDescriptorSets :: proc(ctx: ^Context) {
-    device := ctx.vulkan.device
-    descriptorSets := &ctx.ui.uiDescriptorSets
+	device := ctx.vulkan.device
+	descriptorSets := &ctx.ui.uiDescriptorSets
 
-    layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
-    for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        layouts[i] = ctx.globalDescriptorSetLayouts["ui"]
-    }
+	layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		layouts[i] = ctx.globalDescriptorSetLayouts["ui"]
+	}
 
-    allocInfo := vk.DescriptorSetAllocateInfo{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = ctx.pipe.descriptorPool,
-        descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-        pSetLayouts = &layouts[0],
-    }
+	allocInfo := vk.DescriptorSetAllocateInfo {
+		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+		descriptorPool     = ctx.pipe.descriptorPool,
+		descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+		pSetLayouts        = &layouts[0],
+	}
 
-    checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &descriptorSets[0]))
+	checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &descriptorSets[0]))
 
-    fmt.printf("Font texture - view: %v, sampler: %v\n", ctx.ui.font.texture.view, ctx.ui.font.texture.sampler)
+	fmt.printf(
+		"Font texture - view: %v, sampler: %v\n",
+		ctx.ui.font.texture.view,
+		ctx.ui.font.texture.sampler,
+	)
 
 
-    for i in 0..<MAX_FRAMES_IN_FLIGHT {
-        imageInfo := vk.DescriptorImageInfo{
-            imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-            imageView = ctx.ui.font.texture.view,
-            sampler = ctx.ui.font.texture.sampler
-        }
-    
-        descriptorWrites := []vk.WriteDescriptorSet{
-            {
-                sType = .WRITE_DESCRIPTOR_SET,
-                dstSet = ctx.ui.uiDescriptorSets[i],
-                dstBinding = 0,
-                dstArrayElement = 0,
-                descriptorType = .COMBINED_IMAGE_SAMPLER,
-                descriptorCount = 1,
-                pImageInfo = &imageInfo,
-            },
-        }
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		imageInfo := vk.DescriptorImageInfo {
+			imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+			imageView   = ctx.ui.font.texture.view,
+			sampler     = ctx.ui.font.texture.sampler,
+		}
 
-        vk.UpdateDescriptorSets(device, cast(u32)len(descriptorWrites), &descriptorWrites[0], 0, nil)
-    }
+		descriptorWrites := []vk.WriteDescriptorSet {
+			{
+				sType = .WRITE_DESCRIPTOR_SET,
+				dstSet = ctx.ui.uiDescriptorSets[i],
+				dstBinding = 0,
+				dstArrayElement = 0,
+				descriptorType = .COMBINED_IMAGE_SAMPLER,
+				descriptorCount = 1,
+				pImageInfo = &imageInfo,
+			},
+		}
+
+		vk.UpdateDescriptorSets(
+			device,
+			cast(u32)len(descriptorWrites),
+			&descriptorWrites[0],
+			0,
+			nil,
+		)
+	}
 }
 
 createDescriptorPool :: proc(ctx: ^Context) {
-    poolSizes := []vk.DescriptorPoolSize{
-        {
-            type = .UNIFORM_BUFFER,
-            descriptorCount = MAX_FRAMES_IN_FLIGHT*3
-        },
-        {
-            type = .COMBINED_IMAGE_SAMPLER,
-            descriptorCount = MAX_FRAMES_IN_FLIGHT*20
-        }
-    }
+	poolSizes := []vk.DescriptorPoolSize {
+		{type = .UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT * 3},
+		{type = .COMBINED_IMAGE_SAMPLER, descriptorCount = MAX_FRAMES_IN_FLIGHT * 20},
+	}
 
-    poolInfo : vk.DescriptorPoolCreateInfo
-    poolInfo.sType = .DESCRIPTOR_POOL_CREATE_INFO
-    poolInfo.poolSizeCount = cast(u32)len(poolSizes)
-    poolInfo.pPoolSizes = &poolSizes[0]
-    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT*20
-    
-    if vk.CreateDescriptorPool(ctx.vulkan.device, &poolInfo, nil, &ctx.pipe.descriptorPool) != .SUCCESS {
-        fmt.eprintln("failed to CreateDescriptorPool")
-        os.exit(1)
-    }
+	poolInfo: vk.DescriptorPoolCreateInfo
+	poolInfo.sType = .DESCRIPTOR_POOL_CREATE_INFO
+	poolInfo.poolSizeCount = cast(u32)len(poolSizes)
+	poolInfo.pPoolSizes = &poolSizes[0]
+	poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT * 20
+
+	if vk.CreateDescriptorPool(ctx.vulkan.device, &poolInfo, nil, &ctx.pipe.descriptorPool) !=
+	   .SUCCESS {
+		fmt.eprintln("failed to CreateDescriptorPool")
+		os.exit(1)
+	}
 
 }

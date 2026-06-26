@@ -1,28 +1,34 @@
 package engine
 
-import sdl "vendor:sdl2"
-import vk "vendor:vulkan"
 import "core:fmt"
 import "core:os"
+import sdl "vendor:sdl2"
+import vk "vendor:vulkan"
 
-WINDOW_WIDTH  :: 1920
+WINDOW_WIDTH :: 1920
 WINDOW_HEIGHT :: 1080
 
-initWindow :: proc (ctx: ^Context) {
-    if sdl.Init(sdl.INIT_VIDEO) != 0 {
-        fmt.eprintln("sdl_Init failed: ", sdl.GetError())
-        return
-    }
+initWindow :: proc(ctx: ^Context) {
+	if sdl.Init(sdl.INIT_VIDEO) != 0 {
+		fmt.eprintln("sdl_Init failed: ", sdl.GetError())
+		return
+	}
 
-    // Create window
-    sdlWindow := sdl.CreateWindow("Odin Vulkan Engine", sdl.WINDOWPOS_UNDEFINED, 
-    sdl.WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, {.VULKAN, .RESIZABLE})
+	// Create window
+	sdlWindow := sdl.CreateWindow(
+		"Odin Vulkan Engine",
+		sdl.WINDOWPOS_UNDEFINED,
+		sdl.WINDOWPOS_UNDEFINED,
+		WINDOW_WIDTH,
+		WINDOW_HEIGHT,
+		{.VULKAN, .RESIZABLE},
+	)
 
-    fmt.println(ctx.platform.window)
-    if sdlWindow == nil {
-        fmt.eprintln("Failed to create window: ", sdl.GetError())
-        return
-    }
+	fmt.println(ctx.platform.window)
+	if sdlWindow == nil {
+		fmt.eprintln("Failed to create window: ", sdl.GetError())
+		return
+	}
 
-    ctx.platform.window = sdlWindow
+	ctx.platform.window = sdlWindow
 }

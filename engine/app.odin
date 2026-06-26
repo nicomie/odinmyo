@@ -1,6 +1,5 @@
 package engine
 
-import "vendor:darwin/CoreVideo"
 import cr "../engine/core"
 import "base:runtime"
 import "core:c"
@@ -15,6 +14,7 @@ import "core:slice"
 import "core:strings"
 import "core:time"
 import "vendor:cgltf"
+import "vendor:darwin/CoreVideo"
 import sdl "vendor:sdl2"
 import "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -67,7 +67,7 @@ PipelineContext :: struct {
 	meshPipelineLayout:   vk.PipelineLayout,
 	uiPipelineLayout:     vk.PipelineLayout,
 	descriptorPool:       vk.DescriptorPool,
-	descriptorSetLayouts: map[string]vk.DescriptorSetLayout
+	descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
 }
 
 
@@ -80,22 +80,21 @@ SceneContext :: struct {
 }
 
 Context :: struct {
-	platform:           PlatformContext,
-	vulkan:             VulkanContext,
-	sc:                 SwapchainContext,
-	pipe:               PipelineContext,
-	resource:           ResourceManager,
-	scene:              SceneContext,
-	ui:                 UIContext,
-	frames:             [MAX_FRAMES_IN_FLIGHT]FrameContext,
-	imagesInFlight: 	[]vk.Fence,
-	renderFinishedSemaphores: []vk.Semaphore,
-	currentFrame:       u32,
-	framebufferResized: bool,
-	render: RenderSystem,
-    
+	platform:                   PlatformContext,
+	vulkan:                     VulkanContext,
+	sc:                         SwapchainContext,
+	pipe:                       PipelineContext,
+	resource:                   ResourceManager,
+	scene:                      SceneContext,
+	ui:                         UIContext,
+	frames:                     [MAX_FRAMES_IN_FLIGHT]FrameContext,
+	imagesInFlight:             []vk.Fence,
+	renderFinishedSemaphores:   []vk.Semaphore,
+	currentFrame:               u32,
+	framebufferResized:         bool,
+	render:                     RenderSystem,
 	globalDescriptorSetLayouts: map[string]vk.DescriptorSetLayout,
-	globalDescriptorSets: []vk.DescriptorSet,
+	globalDescriptorSets:       []vk.DescriptorSet,
 }
 
 Ray :: struct {
@@ -135,7 +134,7 @@ initVulkan :: proc(ctx: ^Context) {
 	)
 
 	createCommandPool(ctx)
-    createColorResources(ctx)
+	createColorResources(ctx)
 	createDepthResource(ctx)
 	createFramebuffer(ctx)
 	createUniformBuffers(ctx)
@@ -248,8 +247,9 @@ run :: proc(ctx: ^Context) {
 					break loop
 				case .SPACE:
 					ctx.scene.isPlayer = !ctx.scene.isPlayer
-					
-					ctx.ui.root.stagedText = ctx.scene.isPlayer ? fmt.aprintf("%v", ctx.sc.swapchain.extent) : "Viewing"
+
+					ctx.ui.root.stagedText =
+						ctx.scene.isPlayer ? fmt.aprintf("%v", ctx.sc.swapchain.extent) : "Viewing"
 					if !ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Free)
 					if ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Player)
 					fmt.printf("isPlayer toggled to: %t\n", ctx.scene.isPlayer)
