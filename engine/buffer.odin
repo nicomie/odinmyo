@@ -76,6 +76,10 @@ createVertexBuffer :: proc(ctx: ^Context, vertices: []$T) -> ^Buffer {
     buffer.length = len(vertices)
     buffer.size = cast(vk.DeviceSize)(len(vertices) * size_of(T))
     
+    if buffer.size == 0 {
+        return nil
+    }
+    
     staging: Buffer 
     createBuffer(ctx, buffer.size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, 
         &staging, "vStaging", raw_data(vertices))

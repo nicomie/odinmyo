@@ -69,24 +69,9 @@ recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
     vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["ui"])
     vk.CmdBindDescriptorSets(cmd, .GRAPHICS, ctx.pipe.uiPipelineLayout, 0, 1, &descriptorSets[frameIndex], 0, nil)
 
-    for &element in ctx.ui.elements {
-        screen_size := Vec2{f32(swapchain.extent.width/2), f32(swapchain.extent.height/2)}
-        vk.CmdPushConstants(
-            cmd,
-            ctx.pipe.uiPipelineLayout,
-            {.VERTEX, .FRAGMENT},
-            0,                 
-            size_of(Vec2), 
-            &screen_size,
-        )
+    root := ctx.ui.root
 
-        if &element.vertex_buffer^ != nil {
-            vertexBuffers := [?]vk.Buffer{element.vertex_buffer.buffer}
-            offsets := [?]vk.DeviceSize{0}
-            vk.CmdBindVertexBuffers(cmd, 0, 1, raw_data(vertexBuffers[:]), raw_data(offsets[:]))
-            vk.CmdDraw(cmd, u32(element.vertex_buffer.length), 1, 0, 0)
-        }
-    }
+    if root != nil do RenderUI(cmd, ctx, root, frameIndex)
 }
 
 record3D :: proc(r: ^RenderProcedure,ctx: ^Context, cmd: vk.CommandBuffer, frameIndex: u32) {

@@ -24,9 +24,10 @@ drawFrame :: proc(ctx: ^Context) {
         vk.WaitForFences(device, 1, &ctx.imagesInFlight[imageIndex], true, max(u64))
     }
     vk.ResetFences(device, 1, &ctx.frames[currentFrame].inFlightFence)
+    freeUIVertexBuffers(ctx)
     ctx.imagesInFlight[imageIndex] = ctx.frames[currentFrame].inFlightFence
 
-    UpdateUI(ctx)
+    if ctx.ui.root != nil do UpdateUI(ctx, ctx.ui.root)
     
     vk.ResetCommandBuffer(ctx.frames[currentFrame].commandBuffer, {})
     updateUniformBuffer(ctx, currentFrame)

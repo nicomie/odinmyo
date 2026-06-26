@@ -27,11 +27,6 @@ Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 Mat4 :: linalg.Matrix4f32
 
-UIContext :: struct {
-	font:             Font,
-	elements:         [dynamic]UIElement,
-	uiDescriptorSets: [2 * MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
 
 PlatformContext :: struct {
 	window:                     ^sdl.Window,
@@ -179,7 +174,6 @@ exit :: proc(ctx: ^Context) {
 		vk.FreeMemory(device, texture^.handle.memory, nil)
 	}
 
-	// --- Buffers ---
 	freeCameras(ctx)
 
 	for &mat in ctx.resource.materials {
@@ -189,26 +183,20 @@ exit :: proc(ctx: ^Context) {
 		delete(mat.materialUBO)
 	}
 
-
-	// for mesh in meshes {
 	for &mesh in ctx.resource.meshes {
 		destroyBuffer("vBuffer", device, mesh.vertexBuffer^)
 		destroyBuffer("iBuffer", device, mesh.indexBuffer^)
 	}
 
-	for el in ctx.ui.elements {
-		destroyBuffer("meshVertex", device, ctx.ui.elements[0].vertex_buffer^)
-	}
 	free_font(ctx, &ctx.ui.font)
 
+	freeUIVertexBuffers(ctx)
 
-	// --- Descriptor cleanup ---
 	vk.DestroyDescriptorPool(device, ctx.pipe.descriptorPool, nil)
 	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["global"], nil)
 	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["ui"], nil)
 	delete(ctx.globalDescriptorSetLayouts)
 
-	// --- Pipelines ---
 	for _, pipeline in ctx.pipe.pipelines {
 		vk.DestroyPipeline(device, pipeline, nil)
 	}
@@ -216,10 +204,8 @@ exit :: proc(ctx: ^Context) {
 
 	vk.DestroyPipelineLayout(device, ctx.pipe.uiPipelineLayout, nil)
 
-	// --- Render passes ---
 	vk.DestroyRenderPass(device, ctx.sc.renderPass, nil)
 
-	// --- Sync ---
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphore, nil)
 		vk.DestroyFence(device, ctx.frames[i].inFlightFence, nil)
@@ -228,10 +214,8 @@ exit :: proc(ctx: ^Context) {
 		vk.DestroySemaphore(device, ctx.renderFinishedSemaphores[i], nil)
 	}
 
-	// --- Command pool ---
 	vk.DestroyCommandPool(device, ctx.vulkan.commandPool, nil)
 
-	// --- Device and Instance ---
 	vk.DestroyDevice(device, nil)
 	when ODIN_DEBUG {
 		DestroyDebugUtilsMessengerEXT(ctx.vulkan.instance, ctx.vulkan.debugMessenger, nil)
@@ -239,7 +223,6 @@ exit :: proc(ctx: ^Context) {
 	vk.DestroySurfaceKHR(ctx.vulkan.instance, ctx.vulkan.surface, nil)
 	vk.DestroyInstance(ctx.vulkan.instance, nil)
 
-	// --- SDL ---
 	sdl.DestroyWindow(ctx.platform.window)
 	sdl.Quit()
 }
@@ -266,7 +249,7 @@ run :: proc(ctx: ^Context) {
 				case .SPACE:
 					ctx.scene.isPlayer = !ctx.scene.isPlayer
 					
-					ctx.ui.elements[0].stagedText = ctx.scene.isPlayer ? fmt.aprintf("%v", ctx.sc.swapchain.extent) : "Viewing"
+					ctx.ui.root.stagedText = ctx.scene.isPlayer ? fmt.aprintf("%v", ctx.sc.swapchain.extent) : "Viewing"
 					if !ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Free)
 					if ctx.scene.isPlayer do camera_system_toggle(cameraSystem, .Player)
 					fmt.printf("isPlayer toggled to: %t\n", ctx.scene.isPlayer)
