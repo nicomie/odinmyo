@@ -27,6 +27,8 @@ Vec3 :: linalg.Vector3f32
 Vec4 :: linalg.Vector4f32
 Mat4 :: linalg.Matrix4f32
 
+DEBUG :: false
+
 
 PlatformContext :: struct {
 	window:                     ^sdl.Window,
@@ -34,6 +36,7 @@ PlatformContext :: struct {
 	clickPending:               bool,
 	clickX, clickY:             i32,
 	clickyXDelta, clickyYDelta: i32,
+	mousePos:                   Vec2,
 }
 
 VulkanContext :: struct {
@@ -146,12 +149,17 @@ initVulkan :: proc(ctx: ^Context) {
 	createGlobalPipelineLayouts(ctx)
 
 	bool := AddUI(ctx)
+	layout(ctx, ctx.ui.root)
+
 	createUiDescriptorSets(ctx)
+	createUIVertexBuffers(ctx)
+
 	createSyncObjects(ctx)
 
 	ffmpeg_test()
 	ctx.render.modules = make([]^RenderModule, 1)
 	ctx.render.modules[0] = init3DModule(ctx)
+	vertices := make([dynamic]TextVertex)
 }
 
 exit :: proc(ctx: ^Context) {
@@ -190,6 +198,7 @@ exit :: proc(ctx: ^Context) {
 	free_font(ctx, &ctx.ui.font)
 
 	freeUIVertexBuffers(ctx)
+	delete(ctx.ui.vertices)
 
 	vk.DestroyDescriptorPool(device, ctx.pipe.descriptorPool, nil)
 	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["global"], nil)
@@ -240,6 +249,7 @@ run :: proc(ctx: ^Context) {
 
 		event: sdl.Event
 		for sdl.PollEvent(&event) {
+			ctx.platform.mousePos = Vec2{cast(f32)event.button.x, cast(f32)event.button.y}
 			#partial switch event.type {
 			case .KEYDOWN:
 				#partial switch event.key.keysym.sym {
@@ -313,7 +323,7 @@ run :: proc(ctx: ^Context) {
 			time.sleep(time.Duration(sleep_time * 1e9)) // Nanoseconds
 		}
 	}
-	vk.DeviceWaitIdle(ctx.vulkan.device)
+
 }
 
 main :: proc() {

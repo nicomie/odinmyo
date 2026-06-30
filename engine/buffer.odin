@@ -27,6 +27,7 @@ createBuffer :: proc(
 	name: string = "not specified",
 	data: rawptr = nil,
 ) {
+	buffer.size = bufferSize
 	device := ctx.vulkan.device
 
 	bufferInfo := vk.BufferCreateInfo {
@@ -60,7 +61,9 @@ createBuffer :: proc(
 		vk.UnmapMemory(device, buffer.memory)
 	}
 
-	fmt.printf("Created buffer %s: %p\n", name, buffer.buffer)
+	when DEBUG {
+		fmt.printf("Created buffer %s: %p\n", name, buffer.buffer)
+	}
 }
 
 copyBuffer :: proc(ctx: ^Context, src, dst: Buffer, size: vk.DeviceSize) {
@@ -72,6 +75,24 @@ copyBuffer :: proc(ctx: ^Context, src, dst: Buffer, size: vk.DeviceSize) {
 		size      = size,
 	}
 	vk.CmdCopyBuffer(cmdBuffer, src.buffer, dst.buffer, 1, &copyRegion)
+}
+
+createUIBuffers :: proc(ctx: ^Context) {
+
+	maxVertices := 10000
+	size := vk.DeviceSize(maxVertices * size_of(TextVertex))
+
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+
+		createBuffer(
+			ctx,
+			size,
+			{.VERTEX_BUFFER},
+			{.HOST_VISIBLE, .HOST_COHERENT},
+			&ctx.ui.vertexBuffers[i],
+			"ui buffer",
+		)
+	}
 }
 
 createVertexBuffer :: proc(ctx: ^Context, vertices: []$T) -> ^Buffer {
@@ -164,7 +185,9 @@ createCommandBuffers :: proc(ctx: ^Context) {
 }
 
 destroyBuffer :: proc(name: string, device: vk.Device, buf: Buffer) {
-	fmt.printf("Destroying buffer %s: %p\n", name, buf.buffer)
+	when DEBUG {
+		fmt.printf("Destroying buffer %s: %p\n", name, buf.buffer)
+	}
 	vk.DestroyBuffer(device, buf.buffer, nil)
 	vk.FreeMemory(device, buf.memory, nil)
 }
@@ -198,6 +221,7 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
 	for m in ctx.render.modules {
 		for i in 0 ..< len(m.renderProcedures) {
 			viewport, scissor := getViewportAndScissor(
+				ctx,
 				m.renderProcedures[i].renderTarget,
 				swapchain,
 			)
@@ -214,6 +238,7 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
 }
 
 getViewportAndScissor :: proc(
+	ctx: ^Context,
 	target: RenderTarget,
 	swapchain: ^Swapchain,
 ) -> (
@@ -223,26 +248,39 @@ getViewportAndScissor :: proc(
 	viewport: vk.Viewport
 	scissor: vk.Rect2D
 
-	if target == .Swapchain {
-		viewport.x = 0.0
-		viewport.y = 0.0
-		viewport.width = cast(f32)swapchain.extent.width
-		viewport.height = cast(f32)swapchain.extent.height
-		viewport.minDepth = 0.0
-		viewport.maxDepth = 1.0
 
-		scissor.offset = {0, 0}
-		scissor.extent = swapchain.extent
-	} else if target == .GameViewport {
-		viewport.x = cast(f32)swapchain.extent.width / 2
-		viewport.y = 0.0
-		viewport.width = cast(f32)swapchain.extent.width / 2
-		viewport.height = cast(f32)swapchain.extent.height / 2
-		viewport.minDepth = 0.0
-		viewport.maxDepth = 1.0
+	switch t in target {
+	case Fullscreen:
+		{
+			viewport.x = 0.0
+			viewport.y = 0.0
+			viewport.width = cast(f32)swapchain.extent.width
+			viewport.height = cast(f32)swapchain.extent.height
+			viewport.minDepth = 0.0
+			viewport.maxDepth = 1.0
 
-		scissor.offset = {cast(i32)swapchain.extent.width / 2, 0}
-		scissor.extent = {swapchain.extent.width / 2, swapchain.extent.height / 2}
+			scissor.offset = {0, 0}
+			scissor.extent = swapchain.extent
+		}
+	case ^UIElement:
+		{
+			gameViewport := findGameWindow(ctx, ctx.ui.root)
+			minmax := gameViewport.rect
+
+			viewport.x = minmax.min.x
+			viewport.y = minmax.min.y
+			viewport.width = minmax.max.x - minmax.min.x
+			viewport.height = minmax.max.y - minmax.min.y
+			viewport.minDepth = 0.0
+			viewport.maxDepth = 1.0
+
+			scissor.offset = {cast(i32)minmax.min.x, cast(i32)minmax.min.y}
+
+			scissor.extent = {
+				cast(u32)(minmax.max.x - minmax.min.x),
+				cast(u32)(minmax.max.y - minmax.min.y),
+			}
+		}
 	}
 
 	return viewport, scissor

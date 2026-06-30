@@ -18,9 +18,13 @@ RunMode :: enum {
 	Multi,
 }
 
-RenderTarget :: enum {
+Fullscreen :: enum {
 	Swapchain,
-	GameViewport,
+}
+
+RenderTarget :: union {
+	Fullscreen,
+	^UIElement,
 }
 
 RenderModule :: struct {
@@ -84,7 +88,7 @@ recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 
 	root := ctx.ui.root
 
-	if root != nil do RenderUI(cmd, ctx, root, frameIndex)
+	if root != nil do RenderUI(cmd, ctx, frameIndex)
 }
 
 record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, frameIndex: u32) {
@@ -154,7 +158,7 @@ init3DModule :: proc(ctx: ^Context) -> ^RenderModule {
 	m.renderProcedures[0] = RenderProcedure {
 		record       = record3D,
 		data         = m.data,
-		renderTarget = .GameViewport,
+		renderTarget = findGameWindow(ctx, ctx.ui.root),
 	}
 	m.renderProcedures[1] = RenderProcedure {
 		record       = recordUI,

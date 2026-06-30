@@ -4,12 +4,22 @@ import "core:fmt"
 import "core:os"
 import vk "vendor:vulkan"
 
+
 drawFrame :: proc(ctx: ^Context) {
 	device := ctx.vulkan.device
 	currentFrame := ctx.currentFrame
 	swapchain := &ctx.sc.swapchain
 
 	vk.WaitForFences(device, 1, &ctx.frames[currentFrame].inFlightFence, true, max(u64))
+
+	if ctx.platform.clickPending {
+
+	}
+
+	ctx.ui.hovered = nil
+	layout(ctx, ctx.ui.root)
+	if ctx.ui.root != nil do UISetHovered(ctx, ctx.ui.root)
+	//if currentFrame % 120 == 0 do fmt.printf("%v", ctx.platform.mousePos)
 
 	imageIndex: u32
 	res := vk.AcquireNextImageKHR(
@@ -31,7 +41,6 @@ drawFrame :: proc(ctx: ^Context) {
 		vk.WaitForFences(device, 1, &ctx.imagesInFlight[imageIndex], true, max(u64))
 	}
 	vk.ResetFences(device, 1, &ctx.frames[currentFrame].inFlightFence)
-	freeUIVertexBuffers(ctx)
 	ctx.imagesInFlight[imageIndex] = ctx.frames[currentFrame].inFlightFence
 
 	if ctx.ui.root != nil do UpdateUI(ctx, ctx.ui.root)
@@ -42,11 +51,6 @@ drawFrame :: proc(ctx: ^Context) {
 
 	waitSemaphores := [?]vk.Semaphore{ctx.frames[currentFrame].imageAvailableSemaphore}
 	waitStages := [?]vk.PipelineStageFlags{{.COLOR_ATTACHMENT_OUTPUT}}
-
-
-	if ctx.platform.clickPending {
-		//    processClick(ctx)
-	}
 
 	submitInfo: vk.SubmitInfo
 	submitInfo.sType = .SUBMIT_INFO

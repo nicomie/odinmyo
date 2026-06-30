@@ -1,1 +1,1 @@
-odin run ./engine -debug -collection:ffmpeg=./odin-ffmpeg-bindings/new-odin-bindings 
+odin run ./engine -collection:ffmpeg=./odin-ffmpeg-bindings/new-odin-bindings 

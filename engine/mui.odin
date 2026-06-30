@@ -5,6 +5,7 @@ import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 
 import "core:fmt"
+import "core:mem"
 import "core:strings"
 import "vendor:sdl2/ttf"
 
@@ -34,76 +35,116 @@ ClearUI :: proc(cmdBuf: vk.CommandBuffer, ctx: ^Context, element: ^UIElement) {
 }
 
 freeUIVertexBuffers :: proc(ctx: ^Context) {
-	for &buf in ctx.ui.vertexBuffers {
-		destroyBuffer("uiVertex", ctx.vulkan.device, buf)
+	for &buffer in ctx.ui.vertexBuffers {
+		destroyBuffer("ui", ctx.vulkan.device, buffer)
 	}
-	clear(&ctx.ui.vertexBuffers)
 }
 
-RenderUI :: proc(cmdBuf: vk.CommandBuffer, ctx: ^Context, element: ^UIElement, frame: u32) {
+BuildUIVertices :: proc(ctx: ^Context, element: ^UIElement, vertices: ^[dynamic]TextVertex) {
 	if element == nil do return
 
-	swapchain := ctx.sc.swapchain
-
-
-	fmt.printf("Rendering UI text: '%s'\n", element.stagedText)
-	fmt.printf("%v", element)
-	vertices := render(ctx, element^)
-	fmt.printf("Generated %d vertices for UI text\n", len(vertices))
-	defer delete(vertices)
-
-	if len(vertices) > 0 {
-		vertex_buffer := createVertexBuffer(ctx, vertices[:])
-		if vertex_buffer != nil {
-			fmt.printf("UI vertex buffer created with %d vertices\n", len(vertices))
-			append(&ctx.ui.vertexBuffers, vertex_buffer^)
-			screen_size := Vec2{f32(swapchain.extent.width), f32(swapchain.extent.height)}
-			vk.CmdPushConstants(
-				cmdBuf,
-				ctx.pipe.uiPipelineLayout,
-				{.VERTEX, .FRAGMENT},
-				0,
-				size_of(Vec2),
-				&screen_size,
-			)
-
-			vertexBuffers := [?]vk.Buffer{vertex_buffer.buffer}
-			offsets := [?]vk.DeviceSize{0}
-			vk.CmdBindVertexBuffers(cmdBuf, 0, 1, raw_data(vertexBuffers[:]), raw_data(offsets[:]))
-			vk.CmdDraw(cmdBuf, u32(vertex_buffer.length), 1, 0, 0)
-		} else {
-			fmt.printf("Failed to create UI vertex buffer\n")
-		}
-	} else {
-		fmt.printf("No vertices generated for UI text\n")
+	append(vertices, ..render(ctx, element)[:])
+	for child in element.children {
+		BuildUIVertices(ctx, child, vertices)
 	}
 
 
-	children := element.children
-	for &child in children {
-		if child != nil do RenderUI(cmdBuf, ctx, child, frame)
+}
+
+RenderUI :: proc(cmdBuf: vk.CommandBuffer, ctx: ^Context, frame: u32) {
+	clear(&ctx.ui.vertices)
+
+	BuildUIVertices(ctx, ctx.ui.root, &ctx.ui.vertices)
+
+	if len(ctx.ui.vertices) == 0 {
+		return
 	}
 
+	buffer := &ctx.ui.vertexBuffers[frame]
+	buffer.length = len(ctx.ui.vertices)
+
+	mem.copy(
+		buffer.mapped_ptr,
+		raw_data(ctx.ui.vertices),
+		len(ctx.ui.vertices) * size_of(TextVertex),
+	)
+
+	screen_size := Vec2{f32(ctx.sc.swapchain.extent.width), f32(ctx.sc.swapchain.extent.height)}
+
+	vk.CmdPushConstants(
+		cmdBuf,
+		ctx.pipe.uiPipelineLayout,
+		{.VERTEX, .FRAGMENT},
+		0,
+		size_of(Vec2),
+		&screen_size,
+	)
+
+	vertexBuffers := [?]vk.Buffer{buffer.buffer}
+	offsets := [?]vk.DeviceSize{0}
+
+	vk.CmdBindVertexBuffers(cmdBuf, 0, 1, raw_data(vertexBuffers[:]), raw_data(offsets[:]))
+
+	vk.CmdDraw(cmdBuf, u32(buffer.length), 1, 0, 0)
+}
+
+createUIVertexBuffers :: proc(ctx: ^Context) {
+
+	maxVertices := 10000
+	bufferSize := vk.DeviceSize(maxVertices * size_of(TextVertex))
+
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+
+		createBuffer(
+			ctx,
+			bufferSize,
+			{.VERTEX_BUFFER},
+			{.HOST_VISIBLE, .HOST_COHERENT},
+			&ctx.ui.vertexBuffers[i],
+			"ui vertex buffer",
+		)
+
+		ptr: rawptr
+		vk.MapMemory(ctx.vulkan.device, ctx.ui.vertexBuffers[i].memory, 0, bufferSize, {}, &ptr)
+
+		ctx.ui.vertexBuffers[i].mapped_ptr = ptr
+	}
 }
 
 AddUI :: proc(ctx: ^Context) -> bool {
-	font, font_ok := createFontFromFile(ctx, "Roboto-Regular", 32.0, "arial")
-	ctx.ui.font = font
-
-	if !font_ok {
-		fmt.eprintln("Failed to load font")
+	font, ok := createFontFromFile(ctx, "Roboto-Regular", 32.0, "arial")
+	if !ok {
 		return false
 	}
-	text := ctx.scene.isPlayer ? "Playiiing" : "Viewing"
 
-	viewport := addViewport(ctx, nil)
+	ctx.ui.font = font
 
-	text1 := addText(ctx, viewport, text, 2, DefaultStyle)
-	text2 := addText(ctx, viewport, text, 2, DefaultStyle)
-	btn1 := addButton(ctx, viewport, "I am a button", 3, DefaultButtonStyle, Vec2{0, 0})
+	root := addViewport(
+		ctx,
+		nil,
+		.Normal,
+		Pixels{cast(f32)ctx.sc.swapchain.extent.width},
+		Pixels{cast(f32)ctx.sc.swapchain.extent.height},
+	)
 
-	ctx.ui.root = viewport
-	append(&viewport.children, text1, text2, btn1)
+	root.rect = Rect {
+		min = {0, 0},
+		max = {cast(f32)ctx.sc.swapchain.extent.width, cast(f32)ctx.sc.swapchain.extent.height},
+	}
+	root.layout = .Horizontal
+
+
+	ctx.ui.root = root
+
+
+	gameViewport := addViewport(ctx, root, .Render, .Grow, Percent{50})
+
+	firstWindow := addViewport(ctx, root, .Normal, .Grow, Percent{50})
+	firstWindow.layout = .Vertical
+	firstWindow.style.color = Vec4{0.1, 255, 255, 0.1}
+	addText(ctx, firstWindow, "Playing", DefaultStyle)
+	addText(ctx, firstWindow, "Hello", DefaultStyle)
+	addButton(ctx, firstWindow, "Button", DefaultButtonStyle)
 
 	return true
 }

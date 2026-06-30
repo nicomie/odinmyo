@@ -1,9 +1,10 @@
 package engine
 
+import "core:fmt"
 import vk "vendor:vulkan"
 
 DefaultStyle :: UIStyle {
-	color            = Vec4{255, 1, 1, 1},
+	color            = Vec4{255, 1, 1, .1},
 	border_radius    = 1.0,
 	border_thickness = 1.0,
 	font_size        = 12.0,
@@ -26,7 +27,11 @@ UIContext :: struct {
 	root:             ^UIElement,
 	id:               i32,
 	uiDescriptorSets: [2 * MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-	vertexBuffers:    [dynamic]Buffer,
+	vertexBuffers:    [MAX_FRAMES_IN_FLIGHT]Buffer,
+	vertices:         [dynamic]TextVertex,
+	hovered:          ^UIElement,
+	active:           ^UIElement,
+	minMaxCache:      map[i32]Rect,
 }
 
 UIStyle :: struct {
@@ -37,25 +42,47 @@ UIStyle :: struct {
 }
 
 UIElement :: struct {
-	id:              u32,
-	kind:            UIKind,
-	rect:            Rect,
-	offset:          Vec2,
-	pos:             Vec2,
-	hovered:         bool,
-	pressed:         bool,
-	focused:         bool,
-	parent:          ^UIElement,
-	children:        [dynamic]^UIElement,
-	style:           UIStyle,
-	viewportContext: ViewportContext,
-	text:            string,
-	stagedText:      string,
+	id:         i32,
+	kind:       UIKind,
+	rect:       Rect,
+	offset:     Vec2,
+	pos:        Vec2,
+	hovered:    bool,
+	pressed:    bool,
+	focused:    bool,
+	parent:     ^UIElement,
+	children:   [dynamic]^UIElement,
+	style:      UIStyle,
+	text:       string,
+	stagedText: string,
+	state:      UIState,
+	onClick:    proc(ctx: ^Context, el: ^UIElement),
+	layout:     UILayout,
+	width:      UISize,
+	height:     UISize,
+	padding:    f32,
+	marging:    f32,
+	type:       ViewportType,
 }
 
-ViewportContext :: struct {
-	startX: f32,
-	startY: f32,
+UIState :: bit_set[UIStateFlag]
+UIStateFlag :: enum {
+	Normal,
+	Hovered,
+	Pressed,
+	Focused,
+}
+
+UILayout :: enum {
+	Horizontal,
+	Vertical,
+}
+
+
+ViewportType :: enum {
+	Normal,
+	Render,
+	Fullscreen,
 }
 
 UICommand :: struct {
@@ -78,43 +105,162 @@ UIKind :: enum {
 	ClipEnd,
 }
 
-addButton :: proc(
-	ctx: ^Context,
-	parent: ^UIElement,
-	text: string,
-	zIndex: i32,
-	style: UIStyle,
-	offset: Vec2,
-) -> ^UIElement {
+Flex :: enum {
+	Grow,
+}
 
-	id := ctx.ui.id
-	ctx.ui.id += 1
+Pixels :: struct {
+	value: f32,
+}
 
-	button := new(UIElement)
-	button.kind = .Button
-	button.text = text
-	button.stagedText = text
-	button.style = style
+Percent :: struct {
+	value: f32,
+}
 
-	padding_x: f32 = 8.0
-	padding_y: f32 = 4.0
+UISize :: union {
+	Pixels,
+	Percent,
+	Flex,
+}
 
-	text_w := text_width(ctx.ui.font, text)
-	text_h := ctx.ui.font.metrics.line_height
+layout :: proc(ctx: ^Context, el: ^UIElement) {
 
-	viewport := findViewport(parent)
+	if el == nil do return
 
-	button.pos = Vec2 {
-		viewport.viewportContext.startX + offset.x,
-		viewport.viewportContext.startY + offset.y,
+	parentWidth := el.rect.max.x - el.rect.min.x
+	parentHeight := el.rect.max.y - el.rect.min.y
+
+	fixed: f32 = 0
+	flexCount := 0
+
+
+	for child in el.children {
+
+		size := child.width
+
+		if el.layout == .Vertical {
+			size = child.height
+		}
+		switch val in size {
+		case Pixels:
+			fixed += val.value
+		case Percent:
+			if el.layout == .Horizontal {
+				fixed += parentWidth * val.value / 100
+			} else {
+				fixed += parentHeight * val.value / 100
+			}
+		case Flex:
+			flexCount += 1
+		}
 	}
-	button.rect = Rect{button.pos, Vec2{text_w + padding_x * 2, text_h + padding_y * 2}}
 
-	viewport.viewportContext.startX += button.rect.max.x + offset.x + 8
+	remaining: f32
 
-	addChild(parent, button)
+	if el.layout == .Horizontal {
+		remaining = parentWidth - fixed
+	} else {
+		remaining = parentHeight - fixed
+	}
 
-	return button
+	flexSize: f32 = 0
+
+	if flexCount > 0 {
+		flexSize = remaining / cast(f32)flexCount
+	}
+	cursorX := el.rect.min.x
+	cursorY := el.rect.min.y
+
+	for child in el.children {
+
+		width := parentWidth
+		height := parentHeight
+
+		switch el.layout {
+
+		case .Horizontal:
+			switch val in child.width {
+			case Pixels:
+				width = val.value
+			case Percent:
+				width = parentWidth * val.value / 100
+			case Flex:
+				width = flexSize
+			}
+
+			child.rect = Rect{{cursorX, cursorY}, {cursorX + width, cursorY + height}}
+
+			cursorX += width
+
+		case .Vertical:
+			switch val in child.height {
+			case Pixels:
+				height = val.value
+
+			case Percent:
+				height = parentHeight * val.value / 100
+
+			case Flex:
+				height = flexSize
+			}
+
+			child.rect = Rect{{cursorX, cursorY}, {cursorX + width, cursorY + height}}
+			cursorY += height
+		}
+
+
+		child.pos = child.rect.min
+
+		layout(ctx, child)
+	}
+}
+
+UISetHovered :: proc(ctx: ^Context, el: ^UIElement) -> bool {
+	contains :: proc(min, max, p: Vec2) -> bool {
+		return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y}
+
+
+	if el == nil {
+		return false
+	}
+
+	el.state = {}
+
+	mouse_pos := Vec2{cast(f32)ctx.platform.mousePos.x, cast(f32)ctx.platform.mousePos.y}
+
+	child_hit := false
+	for &child in el.children {
+		if UISetHovered(ctx, child) {
+			child_hit = true
+		}
+	}
+
+	hit := false
+	if el.kind != .Viewport && contains(el.rect.min, el.rect.max, mouse_pos) {
+		el.state = {.Hovered}
+		ctx.ui.hovered = el
+		hit = true
+	}
+
+	if hit do fmt.printf("id %d hovered=%t\n", el.id, hit)
+
+	return hit || child_hit
+}
+
+addButton :: proc(ctx: ^Context, parent: ^UIElement, text: string, style: UIStyle) -> ^UIElement {
+
+	el := createUIElement(ctx, .Button)
+
+	el.text = text
+	el.stagedText = text
+	el.style = style
+
+	el.width = Pixels{text_width(ctx.ui.font, text)}
+	el.height = Pixels{ctx.ui.font.metrics.line_height}
+
+	addChild(parent, el)
+
+	return el
 }
 
 findViewport :: proc(start: ^UIElement) -> ^UIElement {
@@ -123,49 +269,62 @@ findViewport :: proc(start: ^UIElement) -> ^UIElement {
 	return findViewport(start.parent)
 }
 
-addViewport :: proc(ctx: ^Context, parent: ^UIElement) -> ^UIElement {
+findGameWindow :: proc(ctx: ^Context, el: ^UIElement) -> ^UIElement {
+	if el == nil do return nil
 
-	id := ctx.ui.id
-	ctx.ui.id += 1
+	if el.type == .Render {
+		return el
+	}
 
-	window := new(UIElement)
-	window.kind = .Viewport
-	window.viewportContext = ViewportContext{0, 0}
+	for child in el.children {
+		if child == nil do continue
 
-	window.style = DefaultStyle
-	window.style.color = {166, 0, 5, 128}
+		result := findGameWindow(ctx, child)
+		if result != nil do return result
+	}
 
-
-	return window
-
+	return nil
 }
 
-addText :: proc(
+addViewport :: proc(
 	ctx: ^Context,
 	parent: ^UIElement,
-	text: string,
-	zIndex: i32,
-	style: UIStyle,
+	type: ViewportType,
+	width: UISize,
+	height: UISize,
 ) -> ^UIElement {
 
-	id := ctx.ui.id
-	ctx.ui.id += 1
+	el := createUIElement(ctx, .Viewport)
 
-	el := new(UIElement)
-	el.kind = .Text
+	el.width = width
+	el.height = height
+
+	el.style = DefaultStyle
+	el.type = type
+
+	if type == .Render {
+		el.style.color = {255, 0, 0, .1}
+	}
+
+	if parent != nil {
+		addChild(parent, el)
+	}
+
+	return el
+}
+
+addText :: proc(ctx: ^Context, parent: ^UIElement, text: string, style: UIStyle) -> ^UIElement {
+
+	el := createUIElement(ctx, .Text)
+
 	el.text = text
 	el.stagedText = text
 	el.style = style
 
-	text_w := text_width(ctx.ui.font, text)
-	text_h := ctx.ui.font.metrics.line_height
+	textWidth := text_width(ctx.ui.font, text)
 
-	viewport := findViewport(parent)
-
-	el.pos = Vec2{viewport.viewportContext.startX, viewport.viewportContext.startY}
-	el.rect = Rect{el.pos, Vec2{text_w, text_h}}
-
-	viewport.viewportContext.startX += text_w + 8
+	el.width = Pixels{textWidth}
+	el.height = Pixels{ctx.ui.font.metrics.line_height}
 
 	addChild(parent, el)
 
@@ -175,4 +334,19 @@ addText :: proc(
 addChild :: proc(parent: ^UIElement, child: ^UIElement) {
 	append(&parent.children, child)
 	child.parent = parent
+}
+
+createUIElement :: proc(ctx: ^Context, kind: UIKind) -> ^UIElement {
+	el := new(UIElement)
+
+	el.kind = kind
+	el.layout = .Horizontal
+
+	el.width = .Grow
+	el.height = .Grow
+
+	ctx.ui.id += 1
+	el.id = ctx.ui.id
+
+	return el
 }

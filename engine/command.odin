@@ -5,7 +5,9 @@ import "core:os"
 import vk "vendor:vulkan"
 
 beginCommand :: proc(ctx: ^Context) -> vk.CommandBuffer {
-	fmt.println("Beginning command buffer...")
+	when DEBUG {
+		fmt.println("Beginning command buffer...")
+	}
 	allocInfo := vk.CommandBufferAllocateInfo {
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 		level              = .PRIMARY,
@@ -27,7 +29,10 @@ beginCommand :: proc(ctx: ^Context) -> vk.CommandBuffer {
 
 endCommand :: proc(ctx: ^Context, cmdBuffer: ^vk.CommandBuffer) {
 	vk.EndCommandBuffer(cmdBuffer^)
-	fmt.println("Ending command buffer...")
+	when DEBUG {
+		fmt.println("Ending command buffer...")
+	}
+
 	submitInfo := vk.SubmitInfo {
 		sType              = .SUBMIT_INFO,
 		commandBufferCount = 1,

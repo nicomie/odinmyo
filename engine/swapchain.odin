@@ -197,6 +197,19 @@ createSwapchain :: proc(ctx: ^Context) {
 	swapchain.format = surfaceFormat.format
 	swapchain.extent = extent
 
+
+	if ctx.ui.root != nil {
+		ctx.ui.root.rect = Rect {
+			min = {0, 0},
+			max = {
+				cast(f32)ctx.sc.swapchain.extent.width,
+				cast(f32)ctx.sc.swapchain.extent.height,
+			},
+		}
+
+		layout(ctx, ctx.ui.root)
+	}
+
 }
 
 recreateSwapchain :: proc(ctx: ^Context) {

@@ -242,19 +242,12 @@ free_font :: proc(ctx: ^Context, font: ^Font) {
 	}
 }
 
-render :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextVertex) {
+render :: proc(ctx: ^Context, el: ^UIElement) -> (vertices: [dynamic]TextVertex) {
 	#partial switch el.kind {
 	case .Text:
 		append(
 			&vertices,
-			..render_text(
-				ctx,
-				&ctx.ui.font,
-				el.text,
-				el.rect.min.x,
-				el.rect.min.y,
-				el.style.color,
-			)[:],
+			..render_text(ctx, &ctx.ui.font, el.text, el.pos.x, el.pos.y, el.style.color)[:],
 		)
 	case .Button:
 		append(&vertices, ..render_button(ctx, el)[:])
@@ -262,48 +255,16 @@ render :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextVertex) 
 		append(&vertices, ..render_viewport(ctx, el)[:])
 	}
 
-
 	return vertices
 }
 
-render_viewport :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextVertex) {
+render_viewport :: proc(ctx: ^Context, el: ^UIElement) -> (vertices: [dynamic]TextVertex) {
 	rect := make([dynamic]TextVertex)
 
-	min := Vec2{0, 0}
-	max := Vec2{el.viewportContext.startX, el.viewportContext.startY + 60}
-
-	fmt.print(
-		"Rendering viwport with min: (%.2f, %.2f), max: (%.2f, %.2f)\n",
-		min.x,
-		min.y,
-		max.x,
-		max.y,
-	)
-
-	bg_color := Vec4{55, 55, 0, 200}
-
-	noUV := Vec2{-1.0, -1.0}
-
-	append(&rect, TextVertex{{min.x, min.y}, noUV, bg_color})
-	append(&rect, TextVertex{{min.x, max.y}, noUV, bg_color})
-	append(&rect, TextVertex{{max.x, min.y}, noUV, bg_color})
-
-	append(&rect, TextVertex{{min.x, max.y}, noUV, bg_color})
-	append(&rect, TextVertex{{max.x, min.y}, noUV, bg_color})
-	append(&rect, TextVertex{{max.x, max.y}, noUV, bg_color})
-
-	return rect
-
-}
-
-
-render_button :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextVertex) {
-	rect := make([dynamic]TextVertex)
-
-	min := el.pos
-	max := Vec2{el.pos.x + el.rect.max.x, el.pos.y + el.rect.max.y}
-
-	bg_color := Vec4{0, 0, 255, 1}
+	minmax := el.rect
+	min := minmax.min
+	max := minmax.max
+	bg_color := el.style.color
 
 	noUV := Vec2{-1.0, -1.0}
 
@@ -317,8 +278,52 @@ render_button :: proc(ctx: ^Context, el: UIElement) -> (vertices: [dynamic]TextV
 
 	text_w := text_width(ctx.ui.font, el.text)
 	text_h := ctx.ui.font.metrics.ascent - ctx.ui.font.metrics.descent
-	text_x := el.pos.x + (el.rect.max.x - text_w) / 2.0
-	text_y := el.pos.y - el.rect.max.y + text_h
+	text_x := min.x
+	text_y := max.y - text_h + 5
+
+	if el != ctx.ui.root {
+		textVertices := render_text(
+			ctx,
+			&ctx.ui.font,
+			fmt.aprintf("Id %d", el.id),
+			text_x,
+			text_y,
+			Vec4{255, 255, 255, 1},
+		)
+
+		append(&rect, ..textVertices[:])
+	}
+	debug_x := min.x + 10
+	debug_y := min.y + 10
+
+
+	return rect
+
+}
+
+
+render_button :: proc(ctx: ^Context, el: ^UIElement) -> (vertices: [dynamic]TextVertex) {
+	rect := make([dynamic]TextVertex)
+
+	min := el.rect.min
+	max := el.rect.max
+
+	bg_color := ctx.ui.hovered == el ? Vec4{0, 0, 255, 1} : Vec4{0, 0, 150, 1}
+
+	noUV := Vec2{-1.0, -1.0}
+
+	append(&rect, TextVertex{{min.x, min.y}, noUV, bg_color})
+	append(&rect, TextVertex{{min.x, max.y}, noUV, bg_color})
+	append(&rect, TextVertex{{max.x, min.y}, noUV, bg_color})
+
+	append(&rect, TextVertex{{min.x, max.y}, noUV, bg_color})
+	append(&rect, TextVertex{{max.x, min.y}, noUV, bg_color})
+	append(&rect, TextVertex{{max.x, max.y}, noUV, bg_color})
+
+	text_w := text_width(ctx.ui.font, el.text)
+	text_h := ctx.ui.font.metrics.ascent - ctx.ui.font.metrics.descent
+	text_x := el.rect.min.x + 5
+	text_y := el.rect.min.y
 
 	textVertices := render_text(ctx, &ctx.ui.font, el.text, text_x, text_y, el.style.color)
 
@@ -344,14 +349,14 @@ render_text :: proc(
 	font: ^Font,
 	text: string,
 	x, y: f32,
-	color: Vec4,
+	colorr: Vec4,
 ) -> (
 	vertices: [dynamic]TextVertex,
 ) {
 
-	fmt.printf("Setting text color to: %.2f, %.2f, %.2f\n", color.x, color.y, color.z)
+	color := Vec4{255, 255, 255, 1}
 	cursor_x := x
-	cursor_y := y + font.metrics.ascent
+	cursor_y := y + ctx.ui.font.metrics.ascent
 
 	for r in text {
 		if r >= 128 do continue
@@ -364,8 +369,7 @@ render_text :: proc(
 		}
 
 		x_pos := cursor_x + glyph.bearing.x
-		y_pos := cursor_y - (glyph.size.y + glyph.bearing.y) // Position from bottom
-
+		y_pos := cursor_y + glyph.bearing.y
 		w := glyph.size.x
 		h := glyph.size.y
 
@@ -374,20 +378,13 @@ render_text :: proc(
 		max_u := glyph.tex_coords.z
 		max_v := glyph.tex_coords.w
 
-		// Top-left
-		append(&vertices, TextVertex{{x_pos, y_pos}, {min_u, max_v}, color})
-		// Bottom-left
-		append(&vertices, TextVertex{{x_pos, y_pos + h}, {min_u, min_v}, color})
-		// Top-right
-		append(&vertices, TextVertex{{x_pos + w, y_pos}, {max_u, max_v}, color})
+		append(&vertices, TextVertex{{x_pos, y_pos}, {min_u, min_v}, color})
+		append(&vertices, TextVertex{{x_pos, y_pos + h}, {min_u, max_v}, color})
+		append(&vertices, TextVertex{{x_pos + w, y_pos}, {max_u, min_v}, color})
 
-		// Triangle 2
-		// Bottom-left
-		append(&vertices, TextVertex{{x_pos, y_pos + h}, {min_u, min_v}, color})
-		// Top-right
-		append(&vertices, TextVertex{{x_pos + w, y_pos}, {max_u, max_v}, color})
-		// Bottom-right
-		append(&vertices, TextVertex{{x_pos + w, y_pos + h}, {max_u, min_v}, color})
+		append(&vertices, TextVertex{{x_pos, y_pos + h}, {min_u, max_v}, color})
+		append(&vertices, TextVertex{{x_pos + w, y_pos}, {max_u, min_v}, color})
+		append(&vertices, TextVertex{{x_pos + w, y_pos + h}, {max_u, max_v}, color})
 
 		cursor_x += glyph.advance
 	}
