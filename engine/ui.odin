@@ -83,6 +83,7 @@ ViewportType :: enum {
 	Normal,
 	Render,
 	Fullscreen,
+	Debug,
 }
 
 UICommand :: struct {
@@ -269,17 +270,17 @@ findViewport :: proc(start: ^UIElement) -> ^UIElement {
 	return findViewport(start.parent)
 }
 
-findGameWindow :: proc(ctx: ^Context, el: ^UIElement) -> ^UIElement {
+findWindow :: proc(ctx: ^Context, el: ^UIElement, type: ViewportType) -> ^UIElement {
 	if el == nil do return nil
 
-	if el.type == .Render {
+	if el.type == type {
 		return el
 	}
 
 	for child in el.children {
 		if child == nil do continue
 
-		result := findGameWindow(ctx, child)
+		result := findWindow(ctx, child, type)
 		if result != nil do return result
 	}
 

@@ -39,7 +39,7 @@ DescriptorSetLayout :: struct {
 	shaderStageFlags: vk.ShaderStageFlags,
 }
 
-createDescriptorSetLayouts :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
+createDescriptorSetLayoutsForPipe :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
 	device := ctx.vulkan.device
 	materialSetLayout := createDescriptorSetLayout(
 		device,
@@ -54,7 +54,7 @@ createDescriptorSetLayouts :: proc(ctx: ^Context, pipelineContext: ^PipelineCont
 
 }
 
-createGlobalDescriptorSetLayouts :: proc(ctx: ^Context) {
+createDescriptorSetLayouts :: proc(ctx: ^Context) {
 	device := ctx.vulkan.device
 
 	globalSetLayout := createDescriptorSetLayout(
@@ -69,9 +69,17 @@ createGlobalDescriptorSetLayouts :: proc(ctx: ^Context) {
 		},
 	)
 
+	compositeDescriptorSetLayout := createDescriptorSetLayout(
+		device,
+		[]DescriptorSetLayout {
+			{binding = 0, type = .COMBINED_IMAGE_SAMPLER, shaderStageFlags = {.FRAGMENT}},
+		},
+	)
+
 	ctx.globalDescriptorSetLayouts = make(map[string]vk.DescriptorSetLayout)
 	ctx.globalDescriptorSetLayouts["global"] = globalSetLayout
 	ctx.globalDescriptorSetLayouts["ui"] = uiDescriptorSetLayout
+	ctx.globalDescriptorSetLayouts["composite"] = compositeDescriptorSetLayout
 
 }
 
@@ -307,6 +315,49 @@ createUiDescriptorSets :: proc(ctx: ^Context) {
 			0,
 			nil,
 		)
+	}
+}
+
+createCompositeDescriptorSets :: proc(ctx: ^Context) {
+	device := ctx.vulkan.device
+
+	layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
+
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		layouts[i] = ctx.globalDescriptorSetLayouts["composite"]
+	}
+
+	allocInfo := vk.DescriptorSetAllocateInfo {
+		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+		descriptorPool     = ctx.pipe.descriptorPool,
+		descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+		pSetLayouts        = &layouts[0],
+	}
+
+	checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &ctx.pipe.compositeDescriptorSets[0]))
+
+
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+
+		imageInfo := vk.DescriptorImageInfo {
+			imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+			imageView   = ctx.sc.sceneColor.view,
+			sampler     = ctx.sc.sampler,
+		}
+
+
+		write := vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			dstSet          = ctx.pipe.compositeDescriptorSets[i],
+			dstBinding      = 0,
+			dstArrayElement = 0,
+			descriptorType  = .COMBINED_IMAGE_SAMPLER,
+			descriptorCount = 1,
+			pImageInfo      = &imageInfo,
+		}
+
+
+		vk.UpdateDescriptorSets(device, 1, &write, 0, nil)
 	}
 }
 

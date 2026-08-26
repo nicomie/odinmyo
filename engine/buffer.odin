@@ -201,37 +201,54 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
 
 	checkVk(vk.BeginCommandBuffer(buffer, &beginInfo))
 
-	renderPassInfo: vk.RenderPassBeginInfo
-	renderPassInfo.sType = .RENDER_PASS_BEGIN_INFO
-	renderPassInfo.renderPass = ctx.sc.renderPass
-	renderPassInfo.framebuffer = swapchain.attachments.framebuffers[imageIndex]
-	renderPassInfo.renderArea.offset = {0, 0}
-	renderPassInfo.renderArea.extent = swapchain.extent
-
-	clearValues := []vk.ClearValue {
-		{color = {float32 = [4]f32{0.0, 0.0, 0.0, 1.0}}},
-		{depthStencil = {1.0, 0}},
+	colorAttachment: vk.RenderingAttachmentInfo
+	colorAttachment.sType = .RENDERING_ATTACHMENT_INFO
+	colorAttachment.imageView = swapchain.attachments.views[imageIndex]
+	colorAttachment.imageLayout = .COLOR_ATTACHMENT_OPTIMAL
+	colorAttachment.loadOp = .CLEAR
+	colorAttachment.storeOp = .STORE
+	colorAttachment.clearValue = vk.ClearValue {
+		color = {float32 = [4]f32{0.0, 0.0, 0.0, 1.0}},
 	}
 
-	renderPassInfo.clearValueCount = cast(u32)len(clearValues)
-	renderPassInfo.pClearValues = &clearValues[0]
+	depthAttachment: vk.RenderingAttachmentInfo
+	depthAttachment.sType = .RENDERING_ATTACHMENT_INFO
+	depthAttachment.imageView = ctx.sc.sceneDepth.view
+	depthAttachment.imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+	depthAttachment.loadOp = .CLEAR
+	depthAttachment.storeOp = .DONT_CARE
+	depthAttachment.clearValue = vk.ClearValue {
+		depthStencil = {1.0, 0},
+	}
 
-	vk.CmdBeginRenderPass(buffer, &renderPassInfo, .INLINE)
+	renderingInfo: vk.RenderingInfo
+	renderingInfo.sType = .RENDERING_INFO
+	renderingInfo.renderArea.offset = {0, 0}
+	renderingInfo.renderArea.extent = swapchain.extent
+	renderingInfo.layerCount = 1
+	renderingInfo.colorAttachmentCount = 1
+	renderingInfo.pColorAttachments = &colorAttachment
+	renderingInfo.pDepthAttachment = &depthAttachment
+
+	vk.CmdBeginRenderingKHR(buffer, &renderingInfo)
 
 	for m in ctx.render.modules {
 		for i in 0 ..< len(m.renderProcedures) {
 			viewport, scissor := getViewportAndScissor(
 				ctx,
-				m.renderProcedures[i].renderTarget,
+				m.renderProcedures[i].region,
 				swapchain,
 			)
+
 			vk.CmdSetViewport(buffer, 0, 1, &viewport)
 			vk.CmdSetScissor(buffer, 0, 1, &scissor)
+
 			m.renderProcedures[i]->record(ctx, buffer, ctx.currentFrame)
 		}
 	}
 
-	vk.CmdEndRenderPass(buffer)
+	vk.CmdEndRenderingKHR(buffer)
+
 	if vk.EndCommandBuffer(buffer) != .SUCCESS {
 		fmt.eprintln("failed to end command buffer")
 	}
@@ -239,7 +256,7 @@ recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex:
 
 getViewportAndScissor :: proc(
 	ctx: ^Context,
-	target: RenderTarget,
+	region: RenderRegion,
 	swapchain: ^Swapchain,
 ) -> (
 	vk.Viewport,
@@ -249,8 +266,8 @@ getViewportAndScissor :: proc(
 	scissor: vk.Rect2D
 
 
-	switch t in target {
-	case Fullscreen:
+	#partial switch t in region {
+	case RenderOption:
 		{
 			viewport.x = 0.0
 			viewport.y = 0.0
@@ -264,7 +281,7 @@ getViewportAndScissor :: proc(
 		}
 	case ^UIElement:
 		{
-			gameViewport := findGameWindow(ctx, ctx.ui.root)
+			gameViewport := findWindow(ctx, ctx.ui.root, .Render)
 			minmax := gameViewport.rect
 
 			viewport.x = minmax.min.x

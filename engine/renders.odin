@@ -18,13 +18,19 @@ RunMode :: enum {
 	Multi,
 }
 
-Fullscreen :: enum {
-	Swapchain,
+RenderOption :: enum {
+	Fullscreen,
 }
 
-RenderTarget :: union {
-	Fullscreen,
+RenderRegion :: union {
+	RenderOption,
 	^UIElement,
+}
+
+RenderPassType :: enum {
+	Scene,
+	Composite,
+	UI,
 }
 
 RenderModule :: struct {
@@ -60,9 +66,10 @@ RecordProc :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fr
 ExitProc :: proc(r: ^RenderModule, ctx: ^Context)
 
 RenderProcedure :: struct {
-	record:       RecordProc,
-	data:         rawptr,
-	renderTarget: RenderTarget,
+	record: RecordProc,
+	data:   rawptr,
+	pass:   RenderPassType,
+	region: RenderRegion,
 }
 
 ThreeDModule :: struct {
@@ -70,15 +77,27 @@ ThreeDModule :: struct {
 	meshes:   []MeshObject,
 }
 
+findProcedures := proc(m: ^RenderModule, pass: RenderPassType) -> []^RenderProcedure {
+	procedures := make([dynamic]^RenderProcedure, 0)
+
+	for i in 0 ..< len(m.renderProcedures) {
+		if m.renderProcedures[i].pass == pass {
+			append(&procedures, &m.renderProcedures[i])
+		}
+	}
+
+	return procedures[:]
+}
+
 recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, frameIndex: u32) {
 	descriptorSets := &ctx.ui.uiDescriptorSets
 	swapchain := &ctx.sc.swapchain
 
-	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["ui"])
+	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["composite"])
 	vk.CmdBindDescriptorSets(
 		cmd,
 		.GRAPHICS,
-		ctx.pipe.uiPipelineLayout,
+		ctx.pipe.compositePipelineLayout,
 		0,
 		1,
 		&descriptorSets[frameIndex],
@@ -93,7 +112,7 @@ recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 
 record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, frameIndex: u32) {
 	module: ^ThreeDModule = cast(^ThreeDModule)r.data
-	vk.CmdBindPipeline(cmd, .GRAPHICS, module.pipeline.pipelines["mesh"])
+	vk.CmdBindPipeline(cmd, .GRAPHICS, module.pipeline.pipelines["scene"])
 	vk.CmdBindDescriptorSets(
 		cmd,
 		vk.PipelineBindPoint.GRAPHICS,
@@ -148,22 +167,54 @@ record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 
 }
 
+recordComposite :: proc(
+	r: ^RenderProcedure,
+	ctx: ^Context,
+	cmd: vk.CommandBuffer,
+	frameIndex: u32,
+) {
+
+	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["composite"])
+
+	vk.CmdBindDescriptorSets(
+		cmd,
+		.GRAPHICS,
+		ctx.pipe.compositePipelineLayout,
+		0,
+		1,
+		&ctx.pipe.compositeDescriptorSets[frameIndex],
+		0,
+		nil,
+	)
+
+	// fullscreen triangle
+	vk.CmdDraw(cmd, 3, 1, 0, 0)
+}
+
 init3DModule :: proc(ctx: ^Context) -> ^RenderModule {
 	m := new(RenderModule)
 	m.name = "3d"
 	moduleData := new(ThreeDModule)
 	m.data = cast(rawptr)moduleData
 
-	m.renderProcedures = make([]RenderProcedure, 2)
+	m.renderProcedures = make([]RenderProcedure, 3)
 	m.renderProcedures[0] = RenderProcedure {
-		record       = record3D,
-		data         = m.data,
-		renderTarget = findGameWindow(ctx, ctx.ui.root),
+		record = record3D,
+		data   = m.data,
+		pass   = .Scene,
+		region = RenderOption.Fullscreen,
 	}
 	m.renderProcedures[1] = RenderProcedure {
-		record       = recordUI,
-		data         = nil,
-		renderTarget = .Swapchain,
+		record = recordComposite,
+		data   = nil,
+		pass   = .Composite,
+		region = findWindow(ctx, ctx.ui.root, .Render),
+	}
+	m.renderProcedures[2] = RenderProcedure {
+		record = recordUI,
+		data   = nil,
+		pass   = .UI,
+		region = RenderOption.Fullscreen,
 	}
 
 	m.shutdown = shutdownThreeD
@@ -171,7 +222,7 @@ init3DModule :: proc(ctx: ^Context) -> ^RenderModule {
 	moduleData.pipeline.descriptorPool = ctx.pipe.descriptorPool
 	file, errx := os.join_path({"glbs", "SciFiHelmet", "glTF"}, runtime.heap_allocator())
 	setupGlb(ctx, strings.clone_to_cstring(file), "SciFiHelmet.gltf", &moduleData.meshes)
-	createDescriptorSetLayouts(ctx, &moduleData.pipeline)
+	createDescriptorSetLayoutsForPipe(ctx, &moduleData.pipeline)
 	createMaterialDescriptorSets(ctx, moduleData.pipeline.descriptorSetLayouts["material"])
 	createPipelineLayouts(ctx, &moduleData.pipeline)
 	createPipelines(ctx, &moduleData.pipeline)

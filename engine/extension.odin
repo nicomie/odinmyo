@@ -6,7 +6,10 @@ import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 
 EXTENSIONS := [?]cstring{"VK_KHR_display", "VK_KHR_surface", "VK_EXT_debug_utils"}
-DEVICE_EXTENSIONS := [?]cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
+DEVICE_EXTENSIONS := [?]cstring {
+	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
+	vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+}
 
 get_sdlExtensions :: proc(window: ^sdl.Window) -> []cstring {
 

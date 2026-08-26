@@ -73,7 +73,7 @@ RenderUI :: proc(cmdBuf: vk.CommandBuffer, ctx: ^Context, frame: u32) {
 
 	vk.CmdPushConstants(
 		cmdBuf,
-		ctx.pipe.uiPipelineLayout,
+		ctx.pipe.compositePipelineLayout,
 		{.VERTEX, .FRAGMENT},
 		0,
 		size_of(Vec2),
@@ -142,6 +142,9 @@ AddUI :: proc(ctx: ^Context) -> bool {
 	firstWindow := addViewport(ctx, root, .Normal, .Grow, Percent{50})
 	firstWindow.layout = .Vertical
 	firstWindow.style.color = Vec4{0.1, 255, 255, 0.1}
+
+	debug := addViewport(ctx, firstWindow, .Debug, .Grow, Percent{50})
+	debug.style.color = Vec4{0.1, 0.1, 255, 0.1}
 	addText(ctx, firstWindow, "Playing", DefaultStyle)
 	addText(ctx, firstWindow, "Hello", DefaultStyle)
 	addButton(ctx, firstWindow, "Button", DefaultButtonStyle)

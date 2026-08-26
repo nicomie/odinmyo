@@ -52,11 +52,13 @@ VulkanContext :: struct {
 }
 
 SwapchainContext :: struct {
-	swapchain:  Swapchain,
-	renderPass: vk.RenderPass,
-	depthImage: DepthImage,
-	colorImage: DepthImage,
-	msaa:       vk.SampleCountFlags,
+	swapchain:   Swapchain,
+	renderPass:  vk.RenderPass,
+	imageFormat: vk.Format,
+	sceneDepth:  DepthImage,
+	sceneColor:  ColorImage,
+	sampler:     vk.Sampler,
+	msaa:        vk.SampleCountFlags,
 }
 
 FrameContext :: struct {
@@ -66,11 +68,12 @@ FrameContext :: struct {
 }
 
 PipelineContext :: struct {
-	pipelines:            map[string]vk.Pipeline,
-	meshPipelineLayout:   vk.PipelineLayout,
-	uiPipelineLayout:     vk.PipelineLayout,
-	descriptorPool:       vk.DescriptorPool,
-	descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
+	pipelines:               map[string]vk.Pipeline,
+	meshPipelineLayout:      vk.PipelineLayout,
+	compositePipelineLayout: vk.PipelineLayout,
+	compositeDescriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	descriptorPool:          vk.DescriptorPool,
+	descriptorSetLayouts:    map[string]vk.DescriptorSetLayout,
 }
 
 
@@ -131,20 +134,14 @@ initVulkan :: proc(ctx: ^Context) {
 	createImageViews(ctx)
 	findQueueFamilies(ctx)
 
-	ctx.sc.renderPass = createRenderPass(
-		ctx,
-		{format = ctx.sc.swapchain.format, use_depth = true, final_layout = .PRESENT_SRC_KHR},
-	)
-
 	createCommandPool(ctx)
-	createColorResources(ctx)
+	createSceneColorResource(ctx)
 	createDepthResource(ctx)
-	createFramebuffer(ctx)
 	createUniformBuffers(ctx)
 	createCommandBuffers(ctx)
 	createDescriptorPool(ctx)
 
-	createGlobalDescriptorSetLayouts(ctx)
+	createDescriptorSetLayouts(ctx)
 	createGlobalDescriptorSets(ctx)
 	createGlobalPipelineLayouts(ctx)
 
@@ -152,6 +149,7 @@ initVulkan :: proc(ctx: ^Context) {
 	layout(ctx, ctx.ui.root)
 
 	createUiDescriptorSets(ctx)
+	createCompositeDescriptorSets(ctx)
 	createUIVertexBuffers(ctx)
 
 	createSyncObjects(ctx)
@@ -210,7 +208,7 @@ exit :: proc(ctx: ^Context) {
 	}
 	delete(ctx.pipe.pipelines)
 
-	vk.DestroyPipelineLayout(device, ctx.pipe.uiPipelineLayout, nil)
+	//vk.DestroyPipelineLayout(device, ctx.pipe.uiPipelineLayout, nil)
 
 	vk.DestroyRenderPass(device, ctx.sc.renderPass, nil)
 
