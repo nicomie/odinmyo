@@ -9,6 +9,8 @@ EXTENSIONS := [?]cstring{"VK_KHR_display", "VK_KHR_surface", "VK_EXT_debug_utils
 DEVICE_EXTENSIONS := [?]cstring {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+	vk.KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
+	vk.KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
 }
 
 get_sdlExtensions :: proc(window: ^sdl.Window) -> []cstring {

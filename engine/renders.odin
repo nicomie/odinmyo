@@ -93,7 +93,7 @@ recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 	descriptorSets := &ctx.ui.uiDescriptorSets
 	swapchain := &ctx.sc.swapchain
 
-	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["composite"])
+	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["ui"])
 	vk.CmdBindDescriptorSets(
 		cmd,
 		.GRAPHICS,
@@ -173,7 +173,6 @@ recordComposite :: proc(
 	cmd: vk.CommandBuffer,
 	frameIndex: u32,
 ) {
-
 	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipe.pipelines["composite"])
 
 	vk.CmdBindDescriptorSets(

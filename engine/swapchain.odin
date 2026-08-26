@@ -178,6 +178,7 @@ createSwapchain :: proc(ctx: ^Context) {
 	)
 
 	ctx.imagesInFlight = make([]vk.Fence, swapchain.imageCount)
+	ctx.swapchainImageInitialized = make([]bool, swapchain.imageCount)
 	for i in 0 ..< swapchain.imageCount {
 		ctx.imagesInFlight[i] = {}
 	}
@@ -217,7 +218,7 @@ recreateSwapchain :: proc(ctx: ^Context) {
 	if (windowSurface.h == 0 || windowSurface.w == 0) {
 		sdl.GetWindowSurface(ctx.platform.window)
 	}
-	vk.DeviceWaitIdle(ctx.vulkan.device)
+	checkVk(vk.DeviceWaitIdle(ctx.vulkan.device))
 
 	cleanSwapchain(ctx)
 
@@ -225,7 +226,8 @@ recreateSwapchain :: proc(ctx: ^Context) {
 	createImageViews(ctx)
 	createSceneColorResource(ctx)
 	createDepthResource(ctx)
-	createFramebuffer(ctx)
+	ctx.sc.sceneColorInitialized = false
+	updateCompositeDescriptorSets(ctx)
 
 }
 
@@ -237,6 +239,11 @@ cleanSwapchain :: proc(ctx: ^Context) {
 
 	for fb in swapchain.attachments.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
 	for view in swapchain.attachments.views do vk.DestroyImageView(device, view, nil)
+	for semaphore in ctx.renderFinishedSemaphores {
+		vk.DestroySemaphore(device, semaphore, nil)
+	}
+	delete(ctx.renderFinishedSemaphores)
+	ctx.renderFinishedSemaphores = nil
 
 	vk.DestroyImageView(device, colorImage.view, nil)
 	vk.DestroyImage(device, colorImage.image.texture, nil)

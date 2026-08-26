@@ -91,6 +91,7 @@ createImage :: proc(
 	image: ^Image,
 ) {
 	device := ctx.vulkan.device
+	image.format = format
 
 	imageInfo := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,

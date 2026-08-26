@@ -194,64 +194,194 @@ destroyBuffer :: proc(name: string, device: vk.Device, buf: Buffer) {
 
 recordCommandBuffer :: proc(ctx: ^Context, buffer: vk.CommandBuffer, imageIndex: u32) {
 	swapchain := &ctx.sc.swapchain
-
-	beginInfo: vk.CommandBufferBeginInfo
-	beginInfo.sType = .COMMAND_BUFFER_BEGIN_INFO
-	beginInfo.pInheritanceInfo = nil
-
+	beginInfo := vk.CommandBufferBeginInfo {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+	}
 	checkVk(vk.BeginCommandBuffer(buffer, &beginInfo))
 
-	colorAttachment: vk.RenderingAttachmentInfo
-	colorAttachment.sType = .RENDERING_ATTACHMENT_INFO
-	colorAttachment.imageView = swapchain.attachments.views[imageIndex]
-	colorAttachment.imageLayout = .COLOR_ATTACHMENT_OPTIMAL
-	colorAttachment.loadOp = .CLEAR
-	colorAttachment.storeOp = .STORE
-	colorAttachment.clearValue = vk.ClearValue {
-		color = {float32 = [4]f32{0.0, 0.0, 0.0, 1.0}},
+	clearValue := vk.ClearValue {
+		color = {float32 = [4]f32{0, 0, 0, 1}},
 	}
-
-	depthAttachment: vk.RenderingAttachmentInfo
-	depthAttachment.sType = .RENDERING_ATTACHMENT_INFO
-	depthAttachment.imageView = ctx.sc.sceneDepth.view
-	depthAttachment.imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-	depthAttachment.loadOp = .CLEAR
-	depthAttachment.storeOp = .DONT_CARE
-	depthAttachment.clearValue = vk.ClearValue {
-		depthStencil = {1.0, 0},
+	if !ctx.sc.sceneColorInitialized {
+		cmdTransitionImageLayout(
+			buffer,
+			ctx.sc.sceneColor.image.texture,
+			.UNDEFINED,
+			.COLOR_ATTACHMENT_OPTIMAL,
+			{.TOP_OF_PIPE},
+			{.COLOR_ATTACHMENT_OUTPUT},
+			{},
+			{.COLOR_ATTACHMENT_WRITE},
+			{.COLOR},
+		)
+		cmdTransitionImageLayout(
+			buffer,
+			ctx.sc.sceneDepth.image.texture,
+			.UNDEFINED,
+			.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			{.TOP_OF_PIPE},
+			{.EARLY_FRAGMENT_TESTS},
+			{},
+			{.DEPTH_STENCIL_ATTACHMENT_WRITE},
+			{.DEPTH},
+		)
+	} else {
+		cmdTransitionImageLayout(
+			buffer,
+			ctx.sc.sceneColor.image.texture,
+			.SHADER_READ_ONLY_OPTIMAL,
+			.COLOR_ATTACHMENT_OPTIMAL,
+			{.FRAGMENT_SHADER},
+			{.COLOR_ATTACHMENT_OUTPUT},
+			{.SHADER_READ},
+			{.COLOR_ATTACHMENT_WRITE},
+			{.COLOR},
+		)
 	}
-
-	renderingInfo: vk.RenderingInfo
-	renderingInfo.sType = .RENDERING_INFO
-	renderingInfo.renderArea.offset = {0, 0}
-	renderingInfo.renderArea.extent = swapchain.extent
-	renderingInfo.layerCount = 1
-	renderingInfo.colorAttachmentCount = 1
-	renderingInfo.pColorAttachments = &colorAttachment
-	renderingInfo.pDepthAttachment = &depthAttachment
+	depthAttachment := vk.RenderingAttachmentInfo {
+		sType = .RENDERING_ATTACHMENT_INFO,
+		imageView = ctx.sc.sceneDepth.view,
+		imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		loadOp = .CLEAR,
+		storeOp = .DONT_CARE,
+		clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+	}
+	sceneAttachment := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = ctx.sc.sceneColor.view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp      = .CLEAR,
+		storeOp     = .STORE,
+		clearValue  = clearValue,
+	}
+	renderingInfo := vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {offset = {0, 0}, extent = swapchain.extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = &sceneAttachment,
+		pDepthAttachment = &depthAttachment,
+	}
 
 	vk.CmdBeginRenderingKHR(buffer, &renderingInfo)
-
 	for m in ctx.render.modules {
 		for i in 0 ..< len(m.renderProcedures) {
+			if m.renderProcedures[i].pass != .Scene do continue
 			viewport, scissor := getViewportAndScissor(
 				ctx,
 				m.renderProcedures[i].region,
 				swapchain,
 			)
-
 			vk.CmdSetViewport(buffer, 0, 1, &viewport)
 			vk.CmdSetScissor(buffer, 0, 1, &scissor)
-
 			m.renderProcedures[i]->record(ctx, buffer, ctx.currentFrame)
 		}
 	}
-
 	vk.CmdEndRenderingKHR(buffer)
+	ctx.sc.sceneColorInitialized = true
 
-	if vk.EndCommandBuffer(buffer) != .SUCCESS {
-		fmt.eprintln("failed to end command buffer")
+	cmdTransitionImageLayout(
+		buffer,
+		ctx.sc.sceneColor.image.texture,
+		.COLOR_ATTACHMENT_OPTIMAL,
+		.SHADER_READ_ONLY_OPTIMAL,
+		{.COLOR_ATTACHMENT_OUTPUT},
+		{.FRAGMENT_SHADER},
+		{.COLOR_ATTACHMENT_WRITE},
+		{.SHADER_READ},
+		{.COLOR},
+	)
+	if ctx.swapchainImageInitialized[imageIndex] {
+		cmdTransitionImageLayout(
+			buffer,
+			swapchain.images[imageIndex],
+			.PRESENT_SRC_KHR,
+			.COLOR_ATTACHMENT_OPTIMAL,
+			{.COLOR_ATTACHMENT_OUTPUT},
+			{.COLOR_ATTACHMENT_OUTPUT},
+			{.MEMORY_READ},
+			{.COLOR_ATTACHMENT_WRITE},
+			{.COLOR},
+		)
+	} else {
+		cmdTransitionImageLayout(
+			buffer,
+			swapchain.images[imageIndex],
+			.UNDEFINED,
+			.COLOR_ATTACHMENT_OPTIMAL,
+			{.TOP_OF_PIPE},
+			{.COLOR_ATTACHMENT_OUTPUT},
+			{},
+			{.COLOR_ATTACHMENT_WRITE},
+			{.COLOR},
+		)
 	}
+
+	swapchainAttachment := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = swapchain.attachments.views[imageIndex],
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp      = .CLEAR,
+		storeOp     = .STORE,
+		clearValue  = clearValue,
+	}
+	renderingInfo.pColorAttachments = &swapchainAttachment
+	renderingInfo.pDepthAttachment = nil
+	vk.CmdBeginRenderingKHR(buffer, &renderingInfo)
+	for m in ctx.render.modules {
+		for i in 0 ..< len(m.renderProcedures) {
+			if m.renderProcedures[i].pass == .Scene do continue
+			viewport, scissor := getViewportAndScissor(
+				ctx,
+				m.renderProcedures[i].region,
+				swapchain,
+			)
+			vk.CmdSetViewport(buffer, 0, 1, &viewport)
+			vk.CmdSetScissor(buffer, 0, 1, &scissor)
+			m.renderProcedures[i]->record(ctx, buffer, ctx.currentFrame)
+		}
+	}
+	vk.CmdEndRenderingKHR(buffer)
+	ctx.swapchainImageInitialized[imageIndex] = true
+	cmdTransitionImageLayout(
+		buffer,
+		swapchain.images[imageIndex],
+		.COLOR_ATTACHMENT_OPTIMAL,
+		.PRESENT_SRC_KHR,
+		{.COLOR_ATTACHMENT_OUTPUT},
+		{.BOTTOM_OF_PIPE},
+		{.COLOR_ATTACHMENT_WRITE},
+		{.MEMORY_READ},
+		{.COLOR},
+	)
+
+	checkVk(vk.EndCommandBuffer(buffer))
+}
+
+cmdTransitionImageLayout :: proc(
+	buffer: vk.CommandBuffer,
+	image: vk.Image,
+	oldLayout, newLayout: vk.ImageLayout,
+	sourceStage, destinationStage: vk.PipelineStageFlags,
+	sourceAccess, destinationAccess: vk.AccessFlags,
+	aspectMask: vk.ImageAspectFlags,
+) {
+	barrier := vk.ImageMemoryBarrier {
+		sType = .IMAGE_MEMORY_BARRIER,
+		oldLayout = oldLayout,
+		newLayout = newLayout,
+		srcAccessMask = sourceAccess,
+		dstAccessMask = destinationAccess,
+		image = image,
+		subresourceRange = {
+			aspectMask = aspectMask,
+			baseMipLevel = 0,
+			levelCount = 1,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		},
+	}
+	vk.CmdPipelineBarrier(buffer, sourceStage, destinationStage, {}, 0, nil, 0, nil, 1, &barrier)
 }
 
 getViewportAndScissor :: proc(

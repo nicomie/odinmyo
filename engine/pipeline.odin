@@ -73,13 +73,15 @@ createGlobalPipelineLayouts :: proc(ctx: ^Context) {
 
 createPipelines :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
 	scenePipeline := createScenePipeline(ctx, pipelineContext)
-	compositePipeline := createCompositePipeline(ctx, pipelineContext)
+	uiPipeline := createCompositePipeline(ctx, pipelineContext)
+	compositePipeline := createFullscreenCompositePipeline(ctx)
 	pipelineContext.pipelines = make(map[string]vk.Pipeline)
 	pipelineContext.pipelines["scene"] = scenePipeline
 	if ctx.pipe.pipelines == nil {
 		ctx.pipe.pipelines = make(map[string]vk.Pipeline)
 	}
 	ctx.pipe.pipelines["composite"] = compositePipeline
+	ctx.pipe.pipelines["ui"] = uiPipeline
 
 }
 
@@ -197,12 +199,14 @@ createScenePipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) ->
 		pAttachments    = &colorBlendAttachment,
 		blendConstants  = {0, 0, 0, 0},
 	}
+	sceneColorFormat := ctx.sc.swapchain.format
+	sceneDepthFormat := findDepthFormat(ctx.vulkan.physicalDevice)
 
 	renderingInfo := vk.PipelineRenderingCreateInfoKHR {
 		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
 		colorAttachmentCount    = 1,
-		pColorAttachmentFormats = &ctx.sc.sceneColor.image.format,
-		depthAttachmentFormat   = ctx.sc.sceneDepth.image.format,
+		pColorAttachmentFormats = &sceneColorFormat,
+		depthAttachmentFormat   = sceneDepthFormat,
 		stencilAttachmentFormat = .UNDEFINED,
 	}
 
@@ -377,5 +381,98 @@ createCompositePipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext
 		os.exit(1)
 	}
 
+	return pipeline
+}
+
+createFullscreenCompositePipeline :: proc(ctx: ^Context) -> vk.Pipeline {
+	device := ctx.vulkan.device
+	allocator := runtime.heap_allocator()
+	vertPath, _ := os.join_path({"shaders", "composite.vert.spv"}, allocator)
+	fragPath, _ := os.join_path({"shaders", "composite.frag.spv"}, allocator)
+	vertCode, _ := os.read_entire_file_from_path(vertPath, allocator)
+	fragCode, _ := os.read_entire_file_from_path(fragPath, allocator)
+	defer delete(vertCode)
+	defer delete(fragCode)
+	vertModule := createShaderModule(vertCode, device)
+	fragModule := createShaderModule(fragCode, device)
+	defer vk.DestroyShaderModule(device, vertModule, nil)
+	defer vk.DestroyShaderModule(device, fragModule, nil)
+
+	stages := []vk.PipelineShaderStageCreateInfo {
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			stage = {.VERTEX},
+			module = vertModule,
+			pName = "main",
+		},
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			stage = {.FRAGMENT},
+			module = fragModule,
+			pName = "main",
+		},
+	}
+	vertexInput := vk.PipelineVertexInputStateCreateInfo {
+		sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+	}
+	inputAssembly := vk.PipelineInputAssemblyStateCreateInfo {
+		sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		topology = .TRIANGLE_LIST,
+	}
+	viewportState := vk.PipelineViewportStateCreateInfo {
+		sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		viewportCount = 1,
+		scissorCount  = 1,
+	}
+	dynamicStates := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+	dynamicState := vk.PipelineDynamicStateCreateInfo {
+		sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		dynamicStateCount = 2,
+		pDynamicStates    = &dynamicStates[0],
+	}
+	rasterizer := vk.PipelineRasterizationStateCreateInfo {
+		sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		polygonMode = .FILL,
+		lineWidth   = 1.0,
+		cullMode    = {},
+		frontFace   = .COUNTER_CLOCKWISE,
+	}
+	multisampling := vk.PipelineMultisampleStateCreateInfo {
+		sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		rasterizationSamples = {._1},
+	}
+	depthStencil := vk.PipelineDepthStencilStateCreateInfo {
+		sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	}
+	blendAttachment := vk.PipelineColorBlendAttachmentState {
+		colorWriteMask = {.R, .G, .B, .A},
+	}
+	colorBlending := vk.PipelineColorBlendStateCreateInfo {
+		sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		attachmentCount = 1,
+		pAttachments    = &blendAttachment,
+	}
+	renderingInfo := vk.PipelineRenderingCreateInfoKHR {
+		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+		colorAttachmentCount    = 1,
+		pColorAttachmentFormats = &ctx.sc.swapchain.format,
+	}
+	pipelineInfo := vk.GraphicsPipelineCreateInfo {
+		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+		stageCount          = 2,
+		pStages             = &stages[0],
+		pVertexInputState   = &vertexInput,
+		pInputAssemblyState = &inputAssembly,
+		pViewportState      = &viewportState,
+		pRasterizationState = &rasterizer,
+		pMultisampleState   = &multisampling,
+		pDepthStencilState  = &depthStencil,
+		pColorBlendState    = &colorBlending,
+		pDynamicState       = &dynamicState,
+		layout              = ctx.pipe.compositePipelineLayout,
+		pNext               = &renderingInfo,
+	}
+	pipeline: vk.Pipeline
+	checkVk(vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline))
 	return pipeline
 }

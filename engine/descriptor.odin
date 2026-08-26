@@ -336,9 +336,12 @@ createCompositeDescriptorSets :: proc(ctx: ^Context) {
 
 	checkVk(vk.AllocateDescriptorSets(device, &allocInfo, &ctx.pipe.compositeDescriptorSets[0]))
 
+	updateCompositeDescriptorSets(ctx)
+}
 
+updateCompositeDescriptorSets :: proc(ctx: ^Context) {
+	device := ctx.vulkan.device
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-
 		imageInfo := vk.DescriptorImageInfo {
 			imageLayout = .SHADER_READ_ONLY_OPTIMAL,
 			imageView   = ctx.sc.sceneColor.view,
@@ -355,7 +358,6 @@ createCompositeDescriptorSets :: proc(ctx: ^Context) {
 			descriptorCount = 1,
 			pImageInfo      = &imageInfo,
 		}
-
 
 		vk.UpdateDescriptorSets(device, 1, &write, 0, nil)
 	}
