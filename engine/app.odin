@@ -52,11 +52,14 @@ VulkanContext :: struct {
 }
 
 SwapchainContext :: struct {
-	swapchain:  Swapchain,
-	renderPass: vk.RenderPass,
-	depthImage: DepthImage,
-	colorImage: DepthImage,
-	msaa:       vk.SampleCountFlags,
+	swapchain:             Swapchain,
+	renderPass:            vk.RenderPass,
+	imageFormat:           vk.Format,
+	sceneDepth:            DepthImage,
+	sceneColor:            ColorImage,
+	sampler:               vk.Sampler,
+	msaa:                  vk.SampleCountFlags,
+	sceneColorInitialized: bool,
 }
 
 FrameContext :: struct {
@@ -66,11 +69,12 @@ FrameContext :: struct {
 }
 
 PipelineContext :: struct {
-	pipelines:            map[string]vk.Pipeline,
-	meshPipelineLayout:   vk.PipelineLayout,
-	uiPipelineLayout:     vk.PipelineLayout,
-	descriptorPool:       vk.DescriptorPool,
-	descriptorSetLayouts: map[string]vk.DescriptorSetLayout,
+	pipelines:               map[string]vk.Pipeline,
+	meshPipelineLayout:      vk.PipelineLayout,
+	compositePipelineLayout: vk.PipelineLayout,
+	compositeDescriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	descriptorPool:          vk.DescriptorPool,
+	descriptorSetLayouts:    map[string]vk.DescriptorSetLayout,
 }
 
 
@@ -92,6 +96,7 @@ Context :: struct {
 	ui:                         UIContext,
 	frames:                     [MAX_FRAMES_IN_FLIGHT]FrameContext,
 	imagesInFlight:             []vk.Fence,
+	swapchainImageInitialized:  []bool,
 	renderFinishedSemaphores:   []vk.Semaphore,
 	currentFrame:               u32,
 	framebufferResized:         bool,
@@ -127,24 +132,19 @@ initVulkan :: proc(ctx: ^Context) {
 	createSurface(ctx)
 	pickPhysicalDevice(ctx)
 	createLogicalDevice(ctx)
+	vk.load_proc_addresses_device(ctx.vulkan.device)
 	createSwapchain(ctx)
 	createImageViews(ctx)
 	findQueueFamilies(ctx)
 
-	ctx.sc.renderPass = createRenderPass(
-		ctx,
-		{format = ctx.sc.swapchain.format, use_depth = true, final_layout = .PRESENT_SRC_KHR},
-	)
-
 	createCommandPool(ctx)
-	createColorResources(ctx)
+	createSceneColorResource(ctx)
 	createDepthResource(ctx)
-	createFramebuffer(ctx)
 	createUniformBuffers(ctx)
 	createCommandBuffers(ctx)
 	createDescriptorPool(ctx)
 
-	createGlobalDescriptorSetLayouts(ctx)
+	createDescriptorSetLayouts(ctx)
 	createGlobalDescriptorSets(ctx)
 	createGlobalPipelineLayouts(ctx)
 
@@ -152,6 +152,7 @@ initVulkan :: proc(ctx: ^Context) {
 	layout(ctx, ctx.ui.root)
 
 	createUiDescriptorSets(ctx)
+	createCompositeDescriptorSets(ctx)
 	createUIVertexBuffers(ctx)
 
 	createSyncObjects(ctx)
@@ -201,8 +202,10 @@ exit :: proc(ctx: ^Context) {
 	delete(ctx.ui.vertices)
 
 	vk.DestroyDescriptorPool(device, ctx.pipe.descriptorPool, nil)
+	vk.DestroyPipelineLayout(device, ctx.pipe.compositePipelineLayout, nil)
 	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["global"], nil)
 	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["ui"], nil)
+	vk.DestroyDescriptorSetLayout(device, ctx.globalDescriptorSetLayouts["composite"], nil)
 	delete(ctx.globalDescriptorSetLayouts)
 
 	for _, pipeline in ctx.pipe.pipelines {
@@ -210,18 +213,12 @@ exit :: proc(ctx: ^Context) {
 	}
 	delete(ctx.pipe.pipelines)
 
-	vk.DestroyPipelineLayout(device, ctx.pipe.uiPipelineLayout, nil)
-
 	vk.DestroyRenderPass(device, ctx.sc.renderPass, nil)
 
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroySemaphore(device, ctx.frames[i].imageAvailableSemaphore, nil)
 		vk.DestroyFence(device, ctx.frames[i].inFlightFence, nil)
 	}
-	for i in 0 ..< len(ctx.renderFinishedSemaphores) {
-		vk.DestroySemaphore(device, ctx.renderFinishedSemaphores[i], nil)
-	}
-
 	vk.DestroyCommandPool(device, ctx.vulkan.commandPool, nil)
 
 	vk.DestroyDevice(device, nil)

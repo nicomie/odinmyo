@@ -13,9 +13,16 @@ DepthImage :: struct {
 	view:  vk.ImageView,
 }
 
+ColorImage :: struct {
+	image:  Image,
+	view:   vk.ImageView,
+	extent: vk.Extent2D,
+}
+
 Image :: struct {
 	texture: vk.Image,
 	memory:  vk.DeviceMemory,
+	format:  vk.Format,
 }
 
 createImageViews :: proc(ctx: ^Context) {
@@ -84,6 +91,7 @@ createImage :: proc(
 	image: ^Image,
 ) {
 	device := ctx.vulkan.device
+	image.format = format
 
 	imageInfo := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,

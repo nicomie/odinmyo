@@ -10,6 +10,13 @@ DefaultStyle :: UIStyle {
 	font_size        = 12.0,
 }
 
+DefaultStyleSecondLayer :: UIStyle {
+	color            = Vec4{1, 255, 1, .1},
+	border_radius    = 1.0,
+	border_thickness = 1.0,
+	font_size        = 10.0,
+}
+
 DefaultButtonStyle :: UIStyle {
 	color            = Vec4{1, 255, 1, 1},
 	border_radius    = 1.0,
@@ -42,27 +49,28 @@ UIStyle :: struct {
 }
 
 UIElement :: struct {
-	id:         i32,
-	kind:       UIKind,
-	rect:       Rect,
-	offset:     Vec2,
-	pos:        Vec2,
-	hovered:    bool,
-	pressed:    bool,
-	focused:    bool,
-	parent:     ^UIElement,
-	children:   [dynamic]^UIElement,
-	style:      UIStyle,
-	text:       string,
-	stagedText: string,
-	state:      UIState,
-	onClick:    proc(ctx: ^Context, el: ^UIElement),
-	layout:     UILayout,
-	width:      UISize,
-	height:     UISize,
-	padding:    f32,
-	marging:    f32,
-	type:       ViewportType,
+	id:           i32,
+	kind:         UIKind,
+	rect:         Rect,
+	offset:       Vec2,
+	pos:          Vec2,
+	hovered:      bool,
+	pressed:      bool,
+	focused:      bool,
+	parent:       ^UIElement,
+	children:     [dynamic]^UIElement,
+	display_only: bool,
+	style:        UIStyle,
+	text:         string,
+	stagedText:   string,
+	state:        UIState,
+	onClick:      proc(ctx: ^Context, el: ^UIElement),
+	layout:       UILayout,
+	width:        UISize,
+	height:       UISize,
+	padding:      f32,
+	marging:      f32,
+	type:         ViewportType,
 }
 
 UIState :: bit_set[UIStateFlag]
@@ -83,6 +91,7 @@ ViewportType :: enum {
 	Normal,
 	Render,
 	Fullscreen,
+	Debug,
 }
 
 UICommand :: struct {
@@ -188,7 +197,10 @@ layout :: proc(ctx: ^Context, el: ^UIElement) {
 				width = flexSize
 			}
 
-			child.rect = Rect{{cursorX, cursorY}, {cursorX + width, cursorY + height}}
+			child.rect = Rect {
+				{cursorX + child.offset.x, cursorY + child.offset.y},
+				{cursorX + child.offset.x + width, cursorY + child.offset.y + height},
+			}
 
 			cursorX += width
 
@@ -204,7 +216,10 @@ layout :: proc(ctx: ^Context, el: ^UIElement) {
 				height = flexSize
 			}
 
-			child.rect = Rect{{cursorX, cursorY}, {cursorX + width, cursorY + height}}
+			child.rect = Rect {
+				{cursorX + child.offset.x, cursorY + child.offset.y},
+				{cursorX + child.offset.x + width, cursorY + child.offset.y + height},
+			}
 			cursorY += height
 		}
 
@@ -269,17 +284,17 @@ findViewport :: proc(start: ^UIElement) -> ^UIElement {
 	return findViewport(start.parent)
 }
 
-findGameWindow :: proc(ctx: ^Context, el: ^UIElement) -> ^UIElement {
+findWindow :: proc(ctx: ^Context, el: ^UIElement, type: ViewportType) -> ^UIElement {
 	if el == nil do return nil
 
-	if el.type == .Render {
+	if el.type == type {
 		return el
 	}
 
 	for child in el.children {
 		if child == nil do continue
 
-		result := findGameWindow(ctx, child)
+		result := findWindow(ctx, child, type)
 		if result != nil do return result
 	}
 
@@ -328,6 +343,17 @@ addText :: proc(ctx: ^Context, parent: ^UIElement, text: string, style: UIStyle)
 
 	addChild(parent, el)
 
+	return el
+}
+
+addDisplayText :: proc(
+	ctx: ^Context,
+	parent: ^UIElement,
+	text: string,
+	style: UIStyle,
+) -> ^UIElement {
+	el := addText(ctx, parent, text, style)
+	el.display_only = true
 	return el
 }
 

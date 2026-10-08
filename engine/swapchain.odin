@@ -178,6 +178,7 @@ createSwapchain :: proc(ctx: ^Context) {
 	)
 
 	ctx.imagesInFlight = make([]vk.Fence, swapchain.imageCount)
+	ctx.swapchainImageInitialized = make([]bool, swapchain.imageCount)
 	for i in 0 ..< swapchain.imageCount {
 		ctx.imagesInFlight[i] = {}
 	}
@@ -217,30 +218,38 @@ recreateSwapchain :: proc(ctx: ^Context) {
 	if (windowSurface.h == 0 || windowSurface.w == 0) {
 		sdl.GetWindowSurface(ctx.platform.window)
 	}
-	vk.DeviceWaitIdle(ctx.vulkan.device)
+	checkVk(vk.DeviceWaitIdle(ctx.vulkan.device))
 
 	cleanSwapchain(ctx)
 
 	createSwapchain(ctx)
 	createImageViews(ctx)
-	createColorResources(ctx)
+	createSceneColorResource(ctx)
 	createDepthResource(ctx)
-	createFramebuffer(ctx)
+	ctx.sc.sceneColorInitialized = false
+	updateCompositeDescriptorSets(ctx)
 
 }
 
 cleanSwapchain :: proc(ctx: ^Context) {
 	device := ctx.vulkan.device
 	swapchain := &ctx.sc.swapchain
-	depthImage := &ctx.sc.depthImage
-	colorImage := &ctx.sc.colorImage
+	depthImage := &ctx.sc.sceneDepth
+	colorImage := &ctx.sc.sceneColor
 
 	for fb in swapchain.attachments.framebuffers do vk.DestroyFramebuffer(device, fb, nil)
 	for view in swapchain.attachments.views do vk.DestroyImageView(device, view, nil)
+	for semaphore in ctx.renderFinishedSemaphores {
+		vk.DestroySemaphore(device, semaphore, nil)
+	}
+	delete(ctx.renderFinishedSemaphores)
+	ctx.renderFinishedSemaphores = nil
 
 	vk.DestroyImageView(device, colorImage.view, nil)
 	vk.DestroyImage(device, colorImage.image.texture, nil)
 	vk.FreeMemory(device, colorImage.image.memory, nil)
+	vk.DestroySampler(device, ctx.sc.sampler, nil)
+	ctx.sc.sampler = 0
 
 	vk.DestroyImageView(device, depthImage.view, nil)
 	vk.DestroyImage(device, depthImage.image.texture, nil)

@@ -100,6 +100,11 @@ createLogicalDevice :: proc(ctx: ^Context) {
 	createInfo.enabledExtensionCount = cast(u32)len(DEVICE_EXTENSIONS)
 	createInfo.ppEnabledExtensionNames = &DEVICE_EXTENSIONS[0]
 
+	dynmaicRenderingFeatures: vk.PhysicalDeviceDynamicRenderingFeaturesKHR
+	dynmaicRenderingFeatures.sType = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR
+	dynmaicRenderingFeatures.dynamicRendering = true
+	createInfo.pNext = &dynmaicRenderingFeatures
+
 	if ODIN_DEBUG {
 		createInfo.enabledLayerCount = len(VALIDATION_LAYERS)
 		createInfo.ppEnabledLayerNames = &VALIDATION_LAYERS[0]

@@ -6,7 +6,9 @@ import vk "vendor:vulkan"
 
 import "core:fmt"
 import "core:mem"
+import "core:strconv"
 import "core:strings"
+
 import "vendor:sdl2/ttf"
 
 import "core:math"
@@ -73,7 +75,7 @@ RenderUI :: proc(cmdBuf: vk.CommandBuffer, ctx: ^Context, frame: u32) {
 
 	vk.CmdPushConstants(
 		cmdBuf,
-		ctx.pipe.uiPipelineLayout,
+		ctx.pipe.compositePipelineLayout,
 		{.VERTEX, .FRAGMENT},
 		0,
 		size_of(Vec2),
@@ -142,11 +144,39 @@ AddUI :: proc(ctx: ^Context) -> bool {
 	firstWindow := addViewport(ctx, root, .Normal, .Grow, Percent{50})
 	firstWindow.layout = .Vertical
 	firstWindow.style.color = Vec4{0.1, 255, 255, 0.1}
-	addText(ctx, firstWindow, "Playing", DefaultStyle)
-	addText(ctx, firstWindow, "Hello", DefaultStyle)
-	addButton(ctx, firstWindow, "Button", DefaultButtonStyle)
+
+	debug := addViewport(ctx, firstWindow, .Debug, .Grow, Percent{50})
+	debug.style.color = Vec4{0.1, 0.1, 255, 0.1}
+	debug.layout = .Vertical
+
+	content := addViewport(ctx, firstWindow, .Normal, .Grow, Percent{50})
+	content.style.color = Vec4{0.1, 255, 0.1, 0.1}
+	content.layout = .Vertical
+	addText(ctx, content, "Playing", DefaultStyle)
+	addText(ctx, content, "Hello", DefaultStyle)
+	addButton(ctx, content, "Button", DefaultButtonStyle)
+
+	rootChildCount := len(root.children)
+	for childIndex in 0 ..< rootChildCount {
+		addNodeTree(ctx, debug, root.children[childIndex], 0)
+	}
 
 	return true
+}
+
+addNodeTree :: proc(ctx: ^Context, parent: ^UIElement, root: ^UIElement, depth: i32) {
+	if root == nil do return
+
+	childCount := len(root.children)
+	style := depth == 0 ? DefaultStyle : DefaultStyleSecondLayer
+	label := addDisplayText(ctx, parent, fmt.tprintf("%v%d", root.kind, root.id), style)
+	label.offset = Vec2{f32(depth) * 20, 0}
+
+	for childIndex in 0 ..< childCount {
+		child := root.children[childIndex]
+		if child.display_only do continue
+		addNodeTree(ctx, parent, child, depth + 1)
+	}
 }
 
 UI_VERTEX_BINDING := vk.VertexInputBindingDescription {

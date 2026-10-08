@@ -276,26 +276,34 @@ render_viewport :: proc(ctx: ^Context, el: ^UIElement) -> (vertices: [dynamic]Te
 	append(&rect, TextVertex{{max.x, min.y}, noUV, bg_color})
 	append(&rect, TextVertex{{max.x, max.y}, noUV, bg_color})
 
-	text_w := text_width(ctx.ui.font, el.text)
-	text_h := ctx.ui.font.metrics.ascent - ctx.ui.font.metrics.descent
-	text_x := min.x
-	text_y := max.y - text_h + 5
-
 	if el != ctx.ui.root {
-		textVertices := render_text(
-			ctx,
-			&ctx.ui.font,
-			fmt.aprintf("Id %d", el.id),
-			text_x,
-			text_y,
-			Vec4{255, 255, 255, 1},
-		)
+		viewportDepth: i32 = 0
+		ancestor := el.parent
+		for ancestor != nil {
+			if ancestor.kind == .Viewport do viewportDepth += 1
+			ancestor = ancestor.parent
+		}
+
+		text := fmt.aprintf("Id %d", el.id)
+		textWidth := text_width(ctx.ui.font, text)
+		textHeight := ctx.ui.font.metrics.ascent - ctx.ui.font.metrics.descent
+		textX := min.x + 5
+		textY := max.y - textHeight - 5
+
+		switch viewportDepth % 4 {
+		case 2:
+			textX = max.x - textWidth - 5
+		case 3:
+			textX = max.x - textWidth - 5
+			textY = min.y + 5
+		case 0:
+			textX = max.x - textWidth - 5
+		}
+
+		textVertices := render_text(ctx, &ctx.ui.font, text, textX, textY, Vec4{255, 255, 255, 1})
 
 		append(&rect, ..textVertices[:])
 	}
-	debug_x := min.x + 10
-	debug_y := min.y + 10
-
 
 	return rect
 

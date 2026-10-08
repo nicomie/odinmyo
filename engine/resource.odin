@@ -5,9 +5,8 @@ import "core:os"
 import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 
-createColorResources :: proc(ctx: ^Context) {
+createSceneColorResource :: proc(ctx: ^Context) {
 	sc := &ctx.sc
-	colorFormat := sc.swapchain.format
 
 	createImage(
 		ctx,
@@ -15,21 +14,26 @@ createColorResources :: proc(ctx: ^Context) {
 		sc.swapchain.extent.height,
 		1,
 		{._1},
-		colorFormat,
+		sc.swapchain.format,
 		.OPTIMAL,
-		{.TRANSIENT_ATTACHMENT, .COLOR_ATTACHMENT},
+		{.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC},
 		{.DEVICE_LOCAL},
-		&sc.colorImage.image,
+		&sc.sceneColor.image,
 	)
 
-	sc.colorImage.view = createImageView(
+	sc.sceneColor.view = createImageView(
 		ctx,
-		sc.colorImage.image.texture,
-		colorFormat,
+		sc.sceneColor.image.texture,
+		sc.swapchain.format,
 		{.COLOR},
 		1,
-		"color",
+		"sceneColor",
 	)
+
+	samplerTexture := Texture {
+		mips = 1,
+	}
+	sc.sampler = createTextureSampler(ctx, &samplerTexture, "sceneColor", 0)
 }
 
 createDepthResource :: proc(ctx: ^Context) {
@@ -44,13 +48,13 @@ createDepthResource :: proc(ctx: ^Context) {
 		{._1},
 		depthFormat,
 		.OPTIMAL,
-		{.DEPTH_STENCIL_ATTACHMENT},
+		{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 		{.DEVICE_LOCAL},
-		&sc.depthImage.image,
+		&sc.sceneDepth.image,
 	)
-	sc.depthImage.view = createImageView(
+	sc.sceneDepth.view = createImageView(
 		ctx,
-		sc.depthImage.image.texture,
+		sc.sceneDepth.image.texture,
 		depthFormat,
 		{.DEPTH},
 		1,

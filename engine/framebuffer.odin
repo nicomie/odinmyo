@@ -13,7 +13,7 @@ createFramebuffer :: proc(ctx: ^Context) {
 	for i in 0 ..< len(ctx.sc.swapchain.attachments.views) {
 		attachments := []vk.ImageView {
 			ctx.sc.swapchain.attachments.views[i],
-			ctx.sc.depthImage.view,
+			ctx.sc.sceneDepth.view,
 		}
 
 		framebufferInfo: vk.FramebufferCreateInfo

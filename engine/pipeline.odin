@@ -51,36 +51,41 @@ createGlobalPipelineLayouts :: proc(ctx: ^Context) {
 		size       = size_of(Vec2),
 	}
 
-	uiPipelineLayoutInfo := vk.PipelineLayoutCreateInfo {
+	compositePipelineLayoutInfo := vk.PipelineLayoutCreateInfo {
 		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
 		setLayoutCount         = 1,
-		pSetLayouts            = &ctx.globalDescriptorSetLayouts["ui"],
+		pSetLayouts            = &ctx.globalDescriptorSetLayouts["composite"],
 		pushConstantRangeCount = 1,
 		pPushConstantRanges    = &uiPushRange,
 	}
 
 	if vk.CreatePipelineLayout(
 		   ctx.vulkan.device,
-		   &uiPipelineLayoutInfo,
+		   &compositePipelineLayoutInfo,
 		   nil,
-		   &ctx.pipe.uiPipelineLayout,
+		   &ctx.pipe.compositePipelineLayout,
 	   ) !=
 	   .SUCCESS {
-		fmt.eprintln("failed to create pipeline layout (ui)")
+		fmt.eprintln("failed to create pipeline layout (composite)")
 		os.exit(1)
 	}
 }
 
 createPipelines :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) {
-	meshPipeline := createMeshPipeline(ctx, pipelineContext)
-	uiPipeline := createUiPipeline(ctx, pipelineContext)
-	ctx.pipe.pipelines["ui"] = uiPipeline
+	scenePipeline := createScenePipeline(ctx, pipelineContext)
+	uiPipeline := createCompositePipeline(ctx, pipelineContext)
+	compositePipeline := createFullscreenCompositePipeline(ctx)
 	pipelineContext.pipelines = make(map[string]vk.Pipeline)
-	pipelineContext.pipelines["mesh"] = meshPipeline
+	pipelineContext.pipelines["scene"] = scenePipeline
+	if ctx.pipe.pipelines == nil {
+		ctx.pipe.pipelines = make(map[string]vk.Pipeline)
+	}
+	ctx.pipe.pipelines["composite"] = compositePipeline
+	ctx.pipe.pipelines["ui"] = uiPipeline
 
 }
 
-createMeshPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk.Pipeline {
+createScenePipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk.Pipeline {
 	device := ctx.vulkan.device
 	swapchain := ctx.sc.swapchain
 	allocator := runtime.heap_allocator()
@@ -194,6 +199,16 @@ createMeshPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> 
 		pAttachments    = &colorBlendAttachment,
 		blendConstants  = {0, 0, 0, 0},
 	}
+	sceneColorFormat := ctx.sc.swapchain.format
+	sceneDepthFormat := findDepthFormat(ctx.vulkan.physicalDevice)
+
+	renderingInfo := vk.PipelineRenderingCreateInfoKHR {
+		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+		colorAttachmentCount    = 1,
+		pColorAttachmentFormats = &sceneColorFormat,
+		depthAttachmentFormat   = sceneDepthFormat,
+		stencilAttachmentFormat = .UNDEFINED,
+	}
 
 	pipelineInfo := vk.GraphicsPipelineCreateInfo {
 		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -208,20 +223,21 @@ createMeshPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> 
 		pColorBlendState    = &colorBlending,
 		pDynamicState       = &dynamicState,
 		layout              = pipelineContext.meshPipelineLayout,
-		renderPass          = ctx.sc.renderPass,
+		pNext               = &renderingInfo,
 		subpass             = 0,
 	}
 
 	pipeline: vk.Pipeline
-	if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline) != .SUCCESS {
-		fmt.eprintln("failed to create mesh pipeline")
+	result := vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline)
+	if result != .SUCCESS {
+		fmt.eprintln("failed to create mesh pipeline: ", result)
 		os.exit(1)
 	}
 
 	return pipeline
 }
 
-createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk.Pipeline {
+createCompositePipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk.Pipeline {
 	device := ctx.vulkan.device
 	swapchain := ctx.sc.swapchain
 
@@ -261,13 +277,12 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
 
 	shaderStages := []vk.PipelineShaderStageCreateInfo{vertShaderStage, fragShaderStage}
 
-	// Vertex input – replace VERTEX_BINDING / VERTEX_ATTRIBUTES with your UI vertex format
 	vertexInput := vk.PipelineVertexInputStateCreateInfo {
 		sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		vertexBindingDescriptionCount   = 1,
-		pVertexBindingDescriptions      = &UI_VERTEX_BINDING, // <- define UI binding
+		pVertexBindingDescriptions      = &UI_VERTEX_BINDING,
 		vertexAttributeDescriptionCount = cast(u32)len(UI_VERTEX_ATTRIBUTES),
-		pVertexAttributeDescriptions    = &UI_VERTEX_ATTRIBUTES[0], // <- define UI attributes (pos, uv, color)
+		pVertexAttributeDescriptions    = &UI_VERTEX_ATTRIBUTES[0],
 	}
 
 	inputAssembly := vk.PipelineInputAssemblyStateCreateInfo {
@@ -297,7 +312,7 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
 		rasterizerDiscardEnable = false,
 		polygonMode             = .FILL,
 		lineWidth               = 1.0,
-		cullMode                = nil, // no culling for UI
+		cullMode                = nil,
 		frontFace               = .COUNTER_CLOCKWISE,
 		depthBiasEnable         = false,
 	}
@@ -308,17 +323,14 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
 		rasterizationSamples = {._1},
 	}
 
-	// Disable depth test/write for UI
 	depthStencil := vk.PipelineDepthStencilStateCreateInfo {
 		sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		depthTestEnable       = false,
 		depthWriteEnable      = false,
-		depthCompareOp        = .LESS,
 		depthBoundsTestEnable = false,
 		stencilTestEnable     = false,
 	}
 
-	// Enable alpha blending for UI
 	colorBlendAttachment := vk.PipelineColorBlendAttachmentState {
 		colorWriteMask      = {.R, .G, .B, .A},
 		blendEnable         = true,
@@ -337,6 +349,14 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
 		pAttachments    = &colorBlendAttachment,
 	}
 
+	renderingInfo := vk.PipelineRenderingCreateInfoKHR {
+		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+		colorAttachmentCount    = 1,
+		pColorAttachmentFormats = &ctx.sc.swapchain.format,
+		depthAttachmentFormat   = .UNDEFINED,
+		stencilAttachmentFormat = .UNDEFINED,
+	}
+
 	pipelineInfo := vk.GraphicsPipelineCreateInfo {
 		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
 		stageCount          = cast(u32)len(shaderStages),
@@ -349,16 +369,110 @@ createUiPipeline :: proc(ctx: ^Context, pipelineContext: ^PipelineContext) -> vk
 		pDepthStencilState  = &depthStencil,
 		pColorBlendState    = &colorBlending,
 		pDynamicState       = &dynamicStateUI,
-		layout              = ctx.pipe.uiPipelineLayout,
-		renderPass          = ctx.sc.renderPass,
+		layout              = ctx.pipe.compositePipelineLayout,
 		subpass             = 0,
+		pNext               = &renderingInfo,
 	}
 
 	pipeline: vk.Pipeline
-	if vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline) != .SUCCESS {
-		fmt.eprintln("failed to create UI pipeline")
+	result := vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline)
+	if result != .SUCCESS {
+		fmt.eprintln("failed to create UI pipeline: ", result)
 		os.exit(1)
 	}
 
+	return pipeline
+}
+
+createFullscreenCompositePipeline :: proc(ctx: ^Context) -> vk.Pipeline {
+	device := ctx.vulkan.device
+	allocator := runtime.heap_allocator()
+	vertPath, _ := os.join_path({"shaders", "composite.vert.spv"}, allocator)
+	fragPath, _ := os.join_path({"shaders", "composite.frag.spv"}, allocator)
+	vertCode, _ := os.read_entire_file_from_path(vertPath, allocator)
+	fragCode, _ := os.read_entire_file_from_path(fragPath, allocator)
+	defer delete(vertCode)
+	defer delete(fragCode)
+	vertModule := createShaderModule(vertCode, device)
+	fragModule := createShaderModule(fragCode, device)
+	defer vk.DestroyShaderModule(device, vertModule, nil)
+	defer vk.DestroyShaderModule(device, fragModule, nil)
+
+	stages := []vk.PipelineShaderStageCreateInfo {
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			stage = {.VERTEX},
+			module = vertModule,
+			pName = "main",
+		},
+		{
+			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			stage = {.FRAGMENT},
+			module = fragModule,
+			pName = "main",
+		},
+	}
+	vertexInput := vk.PipelineVertexInputStateCreateInfo {
+		sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+	}
+	inputAssembly := vk.PipelineInputAssemblyStateCreateInfo {
+		sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		topology = .TRIANGLE_LIST,
+	}
+	viewportState := vk.PipelineViewportStateCreateInfo {
+		sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		viewportCount = 1,
+		scissorCount  = 1,
+	}
+	dynamicStates := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+	dynamicState := vk.PipelineDynamicStateCreateInfo {
+		sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		dynamicStateCount = 2,
+		pDynamicStates    = &dynamicStates[0],
+	}
+	rasterizer := vk.PipelineRasterizationStateCreateInfo {
+		sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		polygonMode = .FILL,
+		lineWidth   = 1.0,
+		cullMode    = {},
+		frontFace   = .COUNTER_CLOCKWISE,
+	}
+	multisampling := vk.PipelineMultisampleStateCreateInfo {
+		sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		rasterizationSamples = {._1},
+	}
+	depthStencil := vk.PipelineDepthStencilStateCreateInfo {
+		sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	}
+	blendAttachment := vk.PipelineColorBlendAttachmentState {
+		colorWriteMask = {.R, .G, .B, .A},
+	}
+	colorBlending := vk.PipelineColorBlendStateCreateInfo {
+		sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		attachmentCount = 1,
+		pAttachments    = &blendAttachment,
+	}
+	renderingInfo := vk.PipelineRenderingCreateInfoKHR {
+		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+		colorAttachmentCount    = 1,
+		pColorAttachmentFormats = &ctx.sc.swapchain.format,
+	}
+	pipelineInfo := vk.GraphicsPipelineCreateInfo {
+		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+		stageCount          = 2,
+		pStages             = &stages[0],
+		pVertexInputState   = &vertexInput,
+		pInputAssemblyState = &inputAssembly,
+		pViewportState      = &viewportState,
+		pRasterizationState = &rasterizer,
+		pMultisampleState   = &multisampling,
+		pDepthStencilState  = &depthStencil,
+		pColorBlendState    = &colorBlending,
+		pDynamicState       = &dynamicState,
+		layout              = ctx.pipe.compositePipelineLayout,
+		pNext               = &renderingInfo,
+	}
+	pipeline: vk.Pipeline
+	checkVk(vk.CreateGraphicsPipelines(device, 0, 1, &pipelineInfo, nil, &pipeline))
 	return pipeline
 }
