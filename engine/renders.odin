@@ -112,7 +112,22 @@ recordUI :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 
 record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, frameIndex: u32) {
 	module: ^ThreeDModule = cast(^ThreeDModule)r.data
+	transitionShadowMapForRendering(ctx, cmd)
+	recordShadowPass(module, ctx, cmd, frameIndex)
+	transitionShadowMapForSampling(ctx, cmd)
+	recordScenePass(module, ctx, cmd, frameIndex)
+
+
+}
+
+recordScenePass :: proc(
+	module: ^ThreeDModule,
+	ctx: ^Context,
+	cmd: vk.CommandBuffer,
+	frameIndex: u32,
+) {
 	vk.CmdBindPipeline(cmd, .GRAPHICS, module.pipeline.pipelines["scene"])
+
 	vk.CmdBindDescriptorSets(
 		cmd,
 		vk.PipelineBindPoint.GRAPHICS,
@@ -128,9 +143,11 @@ record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 		mesh := ctx.resource.meshes[o.meshIndex]
 
 		vertexBuffers := [?]vk.Buffer{mesh.vertexBuffer.buffer}
+
 		offsets := [?]vk.DeviceSize{0}
 
 		vk.CmdBindVertexBuffers(cmd, 0, 1, &vertexBuffers[0], &offsets[0])
+
 		vk.CmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, .UINT32)
 
 		vk.CmdPushConstants(
@@ -144,6 +161,7 @@ record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 
 		for primitive in mesh.primitives {
 			matIndex := primitive.materialIndex
+
 			vk.CmdBindDescriptorSets(
 				cmd,
 				.GRAPHICS,
@@ -154,6 +172,7 @@ record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 				0,
 				nil,
 			)
+
 			vk.CmdDrawIndexed(
 				cmd,
 				cast(u32)primitive.indexCount,
@@ -164,7 +183,6 @@ record3D :: proc(r: ^RenderProcedure, ctx: ^Context, cmd: vk.CommandBuffer, fram
 			)
 		}
 	}
-
 }
 
 recordComposite :: proc(

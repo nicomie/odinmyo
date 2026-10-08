@@ -5,6 +5,34 @@ import "core:os"
 import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 
+createShadowResource :: proc(ctx: ^Context) {
+	sc := &ctx.sc
+	depthFormat := findDepthFormat(ctx.vulkan.physicalDevice)
+
+	createImage(
+		ctx,
+		sc.swapchain.extent.width,
+		sc.swapchain.extent.height,
+		1,
+		{._1},
+		depthFormat,
+		.OPTIMAL,
+		{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+		{.DEVICE_LOCAL},
+		&ctx.shadow.shadowMap.image,
+	)
+
+	ctx.shadow.shadowMap.view = createImageView(
+		ctx,
+		ctx.shadow.shadowMap.image.texture,
+		depthFormat,
+		{.DEPTH},
+		1,
+		"depth",
+	)
+}
+
+
 createSceneColorResource :: proc(ctx: ^Context) {
 	sc := &ctx.sc
 

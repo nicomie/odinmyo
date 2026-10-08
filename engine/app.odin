@@ -72,6 +72,7 @@ PipelineContext :: struct {
 	pipelines:               map[string]vk.Pipeline,
 	meshPipelineLayout:      vk.PipelineLayout,
 	compositePipelineLayout: vk.PipelineLayout,
+	shadowPipelineLayout:    vk.PipelineLayout,
 	compositeDescriptorSets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 	descriptorPool:          vk.DescriptorPool,
 	descriptorSetLayouts:    map[string]vk.DescriptorSetLayout,
@@ -85,6 +86,7 @@ SceneContext :: struct {
 	isPlayer:     bool,
 	mesh:         Mesh,
 }
+
 
 Context :: struct {
 	platform:                   PlatformContext,
@@ -103,6 +105,8 @@ Context :: struct {
 	render:                     RenderSystem,
 	globalDescriptorSetLayouts: map[string]vk.DescriptorSetLayout,
 	globalDescriptorSets:       []vk.DescriptorSet,
+	shadow:                     ShadowContext,
+	light:                      LightContext,
 }
 
 Ray :: struct {
@@ -111,9 +115,9 @@ Ray :: struct {
 }
 
 Vertex :: struct {
-	pos:      [3]f32,
-	color:    [3]f32,
-	texCoord: [2]f32,
+	pos:      Vec3,
+	color:    Vec3,
+	texCoord: Vec2,
 }
 
 initVulkan :: proc(ctx: ^Context) {
@@ -138,11 +142,15 @@ initVulkan :: proc(ctx: ^Context) {
 	findQueueFamilies(ctx)
 
 	createCommandPool(ctx)
+
+	createShadowResource(ctx)
 	createSceneColorResource(ctx)
 	createDepthResource(ctx)
 	createUniformBuffers(ctx)
 	createCommandBuffers(ctx)
 	createDescriptorPool(ctx)
+
+	initLight(ctx)
 
 	createDescriptorSetLayouts(ctx)
 	createGlobalDescriptorSets(ctx)
